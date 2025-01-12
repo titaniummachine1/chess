@@ -1,53 +1,104 @@
 import pygame as p
-import ChessEngine # Import from the same folder
+import threading  # For the progress window and AI computation
+import tkinter as tk  # For the progress window
+import ChessEngine
 import AI.ChessAI as ChessAI  # Import AI functions
+import time
 
-# Player settings. Turn player_one to True to play as white and/or player_two to True to play black.
-player_one = True  # If the AI is playing white, then False
-player_two = False  # Same as above but for black
+# Player settings
+player_one = True  # White: Player
+player_two = False  # Black: AI
 
-p.init()  # Initialize pygame
+p.init()
 
-board_width = board_height = 680  # Can switch to 512 if screen is too big
-dimension = 8  # Dimensions of a chess board are 8x8
+board_width = board_height = 680
+dimension = 8
 sq_size = board_height // dimension
-max_fps = 15  # For animations
+max_fps = 15
 images = {}
-colours = [p.Color('#EBEBD0'), p.Color('#769455')]  # Board colours
+colours = [p.Color('#EBEBD0'), p.Color('#769455')]
 
-# Move log specifications
-move_log_panel_width = 210  # May want to adjust this if the board_width/board_height is changed.
+move_log_panel_width = 210
 move_log_panel_height = board_height
 
+# Initialize shared variables in ChessAI module
+ChessAI.current_depth = 0
+ChessAI.current_evaluation = 0
+ChessAI.positions_analyzed = 0
+ChessAI.best_move = None
+ChessAI.is_computing = False
+ChessAI.lock = threading.Lock()
 
 def load_images():
-    """Initialize a global dictionary of images."""
-    pieces = ['bR', 'bN', 'bB', 'bQ', 'bK', 'bP',
-              'wR', 'wN', 'wB', 'wQ', 'wK', 'wP']
+    pieces = ['bR', 'bN', 'bB', 'bQ', 'bK', 'bP', 'wR', 'wN', 'wB', 'wQ', 'wK', 'wP']
     for piece in pieces:
         images[piece] = p.transform.smoothscale(
-            p.image.load(f'Chess/images/{piece}.png'), (sq_size, sq_size))
+            p.image.load(f'Chess/images/{piece}.png'), (sq_size, sq_size)
+        )
 
+def show_progress_window():
+    """Tkinter window for showing engine progress."""
+    root = tk.Tk()
+    root.title("AI Analysis Progress")
+    root.geometry("300x200")
+
+    # Labels to display depth, evaluation, and positions analyzed
+    depth_label = tk.Label(root, text="Depth: 0", font=("Arial", 14))
+    eval_label = tk.Label(root, text="Eval: 0.00 (cp)", font=("Arial", 14))
+    positions_label = tk.Label(root, text="Positions: 0", font=("Arial", 14))
+
+    depth_label.pack(pady=10)
+    eval_label.pack(pady=10)
+    positions_label.pack(pady=10)
+
+    def update_labels():
+        """Update labels with real-time AI analysis progress."""
+        with ChessAI.lock:  # Ensure thread-safe access
+            depth = ChessAI.current_depth
+            eval_cp = ChessAI.current_evaluation
+            positions = ChessAI.positions_analyzed
+        depth_label.config(text=f"Depth: {depth}")
+        eval_label.config(text=f"Eval: {eval_cp / 100:.2f} (cp)")
+        positions_label.config(text=f"Positions: {positions}")
+        root.after(100, update_labels)  # Update every 100 ms
+
+    root.after(0, update_labels)
+    root.mainloop()
+
+def ai_move_thread(game_state, valid_moves):
+    """Thread target for computing the AI's best move."""
+    with ChessAI.lock:
+        ChessAI.is_computing = True
+        ChessAI.best_move = None
+        # Reset progress variables
+        ChessAI.current_depth = 0
+        ChessAI.current_evaluation = 0
+        ChessAI.positions_analyzed = 0
+
+    best_move, depth, evaluation = ChessAI.find_best_move(game_state, valid_moves)
+
+    with ChessAI.lock:
+        ChessAI.best_move = best_move
+        ChessAI.is_computing = False
 
 def main():
-    """Main function which handles user input and updates graphics"""
+    # Run the progress window in a separate thread so it doesn't block the main GUI.
+    threading.Thread(target=show_progress_window, daemon=True).start()
+
     screen = p.display.set_mode((board_width + move_log_panel_width, board_height))
     clock = p.time.Clock()
     screen.fill(p.Color('white'))
     move_log_font = p.font.SysFont('Arial', 14, False, False)
-    engine_info_font = p.font.SysFont('Arial', 16, False, False)
     game_state = ChessEngine.GameState()
     valid_moves = game_state.get_valid_moves()
-    move_made = False  # Flag variable for when a move is made
-    animate = False  # Flag variable for when a move should be animated
+    move_made = False
+    animate = False
     load_images()
     running = True
-    square_selected = ()  # Keeps track of the last click by user (tuple: (row, column))
-    player_clicks = []  # Keeps track of player clicks (two tuples: ex. [(6, 4), (4, 4)])
+    square_selected = ()
+    player_clicks = []
     game_over = False
-
-    engine_depth = 0
-    engine_evaluation = 0
+    ai_thread = None  # To keep track of the AI thread
 
     while running:
         human_turn = (game_state.white_to_move and player_one) or (not game_state.white_to_move and player_two)
@@ -56,38 +107,37 @@ def main():
             if event.type == p.QUIT:
                 running = False
 
-            # Mouse handler
             elif event.type == p.MOUSEBUTTONDOWN:
-                if not game_over and human_turn:
-                    location = p.mouse.get_pos()  # (x, y) location of mouse
-                    column = location[0] // sq_size
-                    row = location[1] // sq_size
-                    if square_selected == (row, column) or column >= dimension:  # User clicks same square or move log
-                        square_selected = ()  # Deselects
-                        player_clicks = []  # Clears player clicks
+                if not game_over and human_turn and not ChessAI.is_computing:
+                    location = p.mouse.get_pos()
+                    column, row = location[0] // sq_size, location[1] // sq_size
+                    if square_selected == (row, column) or column >= dimension:
+                        square_selected = ()
+                        player_clicks = []
                     else:
                         square_selected = (row, column)
-                        player_clicks.append(square_selected)  # Appends both 1st and 2nd clicks
+                        player_clicks.append(square_selected)
                     if len(player_clicks) == 2:
                         move = ChessEngine.Move(player_clicks[0], player_clicks[1], game_state.board)
                         for i in range(len(valid_moves)):
                             if move == valid_moves[i]:
                                 game_state.make_move(valid_moves[i])
+                                move_log_font = p.font.SysFont('Arial', 14, False, False)
                                 move_made = True
                                 animate = True
-                                square_selected = ()  # Resets user clicks
+                                square_selected = ()
                                 player_clicks = []
+                                break
                         if not move_made:
                             player_clicks = [square_selected]
 
-            # Key handlers
             elif event.type == p.KEYDOWN:
-                if event.key == p.K_z:  # Undo move when 'z' is pressed
+                if event.key == p.K_z:  # Undo move
                     game_state.undo_move()
                     move_made = True
                     animate = False
                     game_over = False
-                if event.key == p.K_r:  # Reset board when 'r' is pressed
+                if event.key == p.K_r:  # Reset game
                     game_state = ChessEngine.GameState()
                     valid_moves = game_state.get_valid_moves()
                     square_selected = ()
@@ -96,17 +146,18 @@ def main():
                     animate = False
                     game_over = False
 
-        # AI move finder
-        if not game_over and not human_turn:
-            AI_move, depth, evaluation = ChessAI.find_best_move(game_state, valid_moves)
-            engine_depth = depth  # Store depth for rendering
-            engine_evaluation = evaluation  # Store evaluation score
+        if not game_over and not human_turn and not ChessAI.is_computing and ChessAI.best_move is None:
+            # Start the AI computation in a separate thread
+            ai_thread = threading.Thread(target=ai_move_thread, args=(game_state, valid_moves), daemon=True)
+            ai_thread.start()
 
-            if AI_move is None:
-                AI_move = ChessAI.find_random_move(valid_moves)
-            game_state.make_move(AI_move)
+        if not game_over and not human_turn and ChessAI.best_move is not None:
+            # AI has finished computing its move
+            game_state.make_move(ChessAI.best_move)
             move_made = True
             animate = True
+            ChessAI.best_move = None
+            valid_moves = game_state.get_valid_moves()
 
         if move_made:
             if animate:
@@ -115,49 +166,37 @@ def main():
             move_made = False
             animate = False
 
-        draw_game_state(screen, game_state, square_selected, move_log_font, engine_info_font, engine_depth, engine_evaluation)
+        draw_game_state(screen, game_state, square_selected, move_log_font)
 
         if game_state.checkmate or game_state.stalemate:
             game_over = True
-            if game_state.stalemate:
-                text = 'Stalemate'
-            else:
-                text = 'Black wins by checkmate' if game_state.white_to_move else 'White wins by checkmate'
-            draw_engine_info(screen, text)
+            text = 'Stalemate' if game_state.stalemate else f"{'Black' if game_state.white_to_move else 'White'} wins by checkmate"
+            draw_endgame_text(screen, text)
 
         clock.tick(max_fps)
         p.display.flip()
 
-
-def draw_game_state(screen, game_state, square_selected, move_log_font, engine_info_font, depth, evaluation):
-    """Responsible for all graphics within a current game state"""
-    draw_board(screen)  # Draws squares on the board
-    highlight_squares(screen, game_state, square_selected)  # Adds highlighting
-    draw_pieces(screen, game_state.board)  # Draws pieces on the board
-    draw_move_log(screen, game_state, move_log_font)  # Draws the move log
-    draw_engine_info(screen, engine_info_font, depth, evaluation)  # Draw depth and evaluation
-
+def draw_game_state(screen, game_state, square_selected, move_log_font):
+    draw_board(screen)
+    highlight_squares(screen, game_state, square_selected)
+    draw_pieces(screen, game_state.board)
+    draw_move_log(screen, game_state, move_log_font)
 
 def draw_board(screen):
-    """Draw squares on the board using a chess.com colouring pattern"""
     for row in range(dimension):
         for column in range(dimension):
             colour = colours[((row + column) % 2)]
             p.draw.rect(screen, colour, p.Rect(column * sq_size, row * sq_size, sq_size, sq_size))
 
-
 def highlight_squares(screen, game_state, square_selected):
-    """Highlights square selected and last move made"""
-    # Highlights selected square
     if square_selected != ():
         row, column = square_selected
-        if game_state.board[row][column][0] == ('w' if game_state.white_to_move else 'b'):  # Clicks on own piece
+        if game_state.board[row][column][0] == ('w' if game_state.white_to_move else 'b'):
             s = p.Surface((sq_size, sq_size))
-            s.set_alpha(70)  # Transperancy value; 0 transparent; 255 opaque
+            s.set_alpha(70)
             s.fill(p.Color('yellow'))
             screen.blit(s, (column * sq_size, row * sq_size))
 
-    # Highlights last move
     if len(game_state.move_log) != 0:
         last_move = game_state.move_log[-1]
         start_row, start_column = last_move.start_row, last_move.start_column
@@ -168,25 +207,21 @@ def highlight_squares(screen, game_state, square_selected):
         screen.blit(s, (start_column * sq_size, start_row * sq_size))
         screen.blit(s, (end_column * sq_size, end_row * sq_size))
 
-
 def draw_pieces(screen, board):
-    """Draws pieces on the board using the current GameState.board"""
     for row in range(dimension):
         for column in range(dimension):
             piece = board[row][column]
-            if piece != '--':  # Add pieces if not an empty square
+            if piece != '--':
                 screen.blit(images[piece], p.Rect(column * sq_size, row * sq_size, sq_size, sq_size))
 
-
 def draw_move_log(screen, game_state, font):
-    """Draws move log to the right of the screen"""
     move_log_area = p.Rect(board_width, 0, move_log_panel_width, move_log_panel_height)
     p.draw.rect(screen, p.Color('#2d2d2e'), move_log_area)
     move_log = game_state.move_log
     move_texts = []
     for i in range(0, len(move_log), 2):
         move_string = f'{i // 2 + 1}. {str(move_log[i])} '
-        if i + 1 < len(move_log):  # Makes sure black has made a move
+        if i + 1 < len(move_log):
             move_string += f'{str(move_log[i + 1])} '
         move_texts.append(move_string)
 
@@ -204,51 +239,34 @@ def draw_move_log(screen, game_state, font):
         screen.blit(text_object, text_location)
         text_y += text_object.get_height() + line_spacing
 
-
 def animate_move(move, screen, board, clock):
-    """Animates a move"""
-    delta_row = move.end_row - move.start_row  # Change in row
-    delta_column = move.end_column - move.start_column  # Change in column
-    frames_per_square = 5  # Controls animation speed (frames to move one square)
+    delta_row = move.end_row - move.start_row
+    delta_column = move.end_column - move.start_column
+    frames_per_square = 5
     frame_count = (abs(delta_row) + abs(delta_column)) * frames_per_square
 
-    for frame in range(frame_count + 1):  # Need +1 to complete the entire animation
-
-        #  Frame/frame_count indicates how far along the action is
-        row, column = (move.start_row + delta_row*frame/frame_count, move.start_column + delta_column*frame/frame_count)
-
-        # Draw board and pieces for each frame of the animation
+    for frame in range(frame_count + 1):
+        row = move.start_row + delta_row * frame / frame_count
+        column = move.start_column + delta_column * frame / frame_count
         draw_board(screen)
         draw_pieces(screen, board)
-
-        # Erases the piece from its ending square
-        colour = colours[(move.end_row + move.end_column) % 2]
-        end_square = p.Rect(move.end_column * sq_size, move.end_row * sq_size, sq_size, sq_size)
-        p.draw.rect(screen, colour, end_square)
-
-        # Draws a captured piece onto the rectangle if a piece is captured
-        if move.piece_captured != '--':
-            if move.is_en_passant_move:
-                en_passant_row = move.end_row + 1 if move.piece_captured[0] == 'b' else move.end_row - 1
-                end_square = p.Rect(move.end_column * sq_size, en_passant_row * sq_size, sq_size, sq_size)
-            screen.blit(images[move.piece_captured], end_square)
-
-        # Draws moving piece
-        screen.blit(images[move.piece_moved], p.Rect(column * sq_size, row * sq_size, sq_size, sq_size))
-
+        # Redraw the moving piece
+        moving_piece = board[move.end_row][move.end_column]
+        if moving_piece != '--':
+            screen.blit(images[moving_piece], p.Rect(column * sq_size, row * sq_size, sq_size, sq_size))
         p.display.flip()
-        clock.tick(60)  # Controls fame rate per second for the animation
+        clock.tick(60)
 
-
-def draw_engine_info(screen, font, depth, evaluation):
-    """Draws engine information such as current depth and evaluation."""
-    engine_info_area = p.Rect(board_width + 10, board_height - 40, move_log_panel_width - 20, 30)
-    p.draw.rect(screen, p.Color('black'), engine_info_area)
-
-    text = f"Depth: {depth}, Eval: {evaluation / 100:.2f} (cp)"  # Convert evaluation to centipawns
-    text_object = font.render(text, True, p.Color('white'))
-    screen.blit(text_object, engine_info_area.move(5, 5))
-
+def draw_endgame_text(screen, text):
+    font = p.font.SysFont('Helvetica', 32, True, False)
+    text_object = font.render(text, True, p.Color('gray'), p.Color('mintcream'))
+    text_location = p.Rect(0, 0, board_width, board_height).move(
+        board_width / 2 - text_object.get_width() / 2,
+        board_height / 2 - text_object.get_height() / 2
+    )
+    screen.blit(text_object, text_location)
+    text_object = font.render(text, True, p.Color('black'))
+    screen.blit(text_object, text_location.move(2, 2))
 
 if __name__ == '__main__':
     main()

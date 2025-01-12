@@ -3,10 +3,15 @@ import random
 import time  # To track the time taken for each depth
 
 checkmate_points = 100000  # 1000 points as centipawns (multiplied by 100)
-set_depth = 4  # Max depth for iterative deepening
+set_depth = 5  # Max depth for iterative deepening
 
 # Dictionary to store book moves {FEN: [(move, count), (move, count), ...]}
 book_moves = {}
+
+# Global variables for GUI to access
+current_depth = 0  # The current depth being evaluated
+current_evaluation = 0  # The evaluation score at the current depth
+
 
 def load_book_moves():
     """Loads book moves from Book.txt in the new format."""
@@ -22,7 +27,9 @@ def load_book_moves():
                 count = int(count)  # Convert count to integer
                 book_moves[current_fen].append((move, count))  # Store (move, count) as a tuple
 
+
 load_book_moves()  # Load book moves at the start
+
 
 def get_random_book_move(fen):
     """Returns a random book move using weighted randomness based on frequency."""
@@ -45,17 +52,19 @@ def get_random_book_move(fen):
     chosen_move = random.choices(moves, weights=probabilities, k=1)[0]
     return chosen_move
 
+
 def find_random_move(valid_moves):
     """Returns a completely random move from the list of valid moves."""
     if not valid_moves:
         return None  # No valid moves
     return random.choice(valid_moves)
 
+
 def find_best_move_from_fen(game_state):
     """Reads FEN, generates valid moves, and finds the best move."""
     fen = game_state.get_fen()  # Get FEN from your GameState class
     book_move = get_random_book_move(fen)  # Get a random weighted book move
-    
+
     if book_move:
         print(f"Playing book move: {book_move}")
         return book_move, 0, 0  # No depth or evaluation for book move
@@ -63,30 +72,34 @@ def find_best_move_from_fen(game_state):
     # If no book move, fallback to AI move
     valid_moves = game_state.get_valid_moves()
 
-    # Example of fallback to random move if no calculated move
     if not valid_moves:
-        return None, 0, 0
+        return None, 0, 0  # No valid moves available
+
     best_move, depth_reached, eval_score = find_best_move(game_state, valid_moves)
     return best_move, depth_reached, eval_score
 
+
 def find_best_move(game_state, valid_moves):
     """Find the best move using iterative deepening with Negamax and Alpha-Beta pruning."""
-    global next_move
+    global current_depth, current_evaluation, next_move
     next_move = None
-    eval_score = 0
 
-    # Iterative deepening from depth 1 to set_depth
+    # Iterative deepening loop
     for depth in range(1, set_depth + 1):
-        eval_score = find_negamax_move_alphabeta(game_state, valid_moves, depth, -checkmate_points, checkmate_points,
-                                                 1 if game_state.white_to_move else -1)
+        current_depth = depth  # Update the current depth
+        current_evaluation = find_negamax_move_alphabeta(game_state, valid_moves, depth, -checkmate_points,
+                                                         checkmate_points, 1 if game_state.white_to_move else -1)
 
-    return next_move, depth, eval_score
+    return next_move, current_depth, current_evaluation
+
 
 def find_negamax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, turn_multiplier):
     """Negamax algorithm with alpha-beta pruning."""
-    global next_move
+    global next_move, current_evaluation
     if depth == 0:
-        return turn_multiplier * score_board(game_state)  # Leaf node evaluation
+        evaluation = turn_multiplier * score_board(game_state)
+        current_evaluation = evaluation  # Update evaluation at leaf nodes
+        return evaluation
 
     max_score = -checkmate_points
     for move in valid_moves:
@@ -97,12 +110,11 @@ def find_negamax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, tur
 
         if score > max_score:
             max_score = score
-            if depth == set_depth:
-                next_move = move  # Only store the move at the max depth
+            if depth == current_depth:  # Only update the best move at the current search depth
+                next_move = move
 
-        # Alpha-beta pruning
         alpha = max(alpha, max_score)
         if alpha >= beta:
-            break  # Cut-off branch
+            break  # Beta cutoff
 
     return max_score
