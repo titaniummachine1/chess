@@ -142,17 +142,27 @@ class GameState:
             self.checkmate = False
 
     def get_valid_moves(self):
-        """Gets all possible moves without considering checks or pins."""
-        valid_moves = self.get_all_possible_moves()  # Get all possible moves without considering checks
+        """Gets all possible moves without considering checks or pins and checks for king presence."""
+        # Check if the player's king is still on the board
+        if self.white_to_move:
+            if not any('wK' in row for row in self.board):
+                self.checkmate = True  # Game over since white's king is gone
+                return []
+        else:
+            if not any('bK' in row for row in self.board):
+                self.checkmate = True  # Game over since black's king is gone
+                return []
+
+        # Get all possible moves (ignoring checks and pins)
+        valid_moves = self.get_all_possible_moves()
 
         if len(valid_moves) == 0:  # No legal moves
             print(f"{'White' if self.white_to_move else 'Black'} has no legal moves and loses!")
             self.checkmate = True  # Game over due to no legal moves
-            self.game_over = True
             return []
 
-        # Allow moving into check and ignoring pins
         return valid_moves
+
 
 
     def get_all_possible_moves(self):

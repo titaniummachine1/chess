@@ -6,7 +6,7 @@ import AI.ChessAI as ChessAI  # Import AI functions
 import time
 
 # Player settings
-player_one = False
+player_one = True
 player_two = False
 
 p.init()
