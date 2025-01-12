@@ -2,7 +2,7 @@ from AI.evaluation import score_board
 import random
 
 checkmate_points = 100000  # 1000 points as centipawns (multiplied by 100)
-set_depth = 4  # Search depth for Negamax
+set_depth = 4
 
 # Dictionary to store book moves {FEN: [(move, count), (move, count), ...]}
 book_moves = {}
