@@ -35,6 +35,7 @@ def main():
     clock = p.time.Clock()
     screen.fill(p.Color('white'))
     move_log_font = p.font.SysFont('Arial', 14, False, False)
+    engine_info_font = p.font.SysFont('Arial', 16, False, False)
     game_state = ChessEngine.GameState()
     valid_moves = game_state.get_valid_moves()
     move_made = False  # Flag variable for when a move is made
@@ -44,6 +45,9 @@ def main():
     square_selected = ()  # Keeps track of the last click by user (tuple: (row, column))
     player_clicks = []  # Keeps track of player clicks (two tuples: ex. [(6, 4), (4, 4)])
     game_over = False
+
+    engine_depth = 0
+    engine_evaluation = 0
 
     while running:
         human_turn = (game_state.white_to_move and player_one) or (not game_state.white_to_move and player_two)
@@ -83,7 +87,7 @@ def main():
                     move_made = True
                     animate = False
                     game_over = False
-                if event.key == p.K_r:  # Reset board when 'r is pressed
+                if event.key == p.K_r:  # Reset board when 'r' is pressed
                     game_state = ChessEngine.GameState()
                     valid_moves = game_state.get_valid_moves()
                     square_selected = ()
@@ -94,7 +98,10 @@ def main():
 
         # AI move finder
         if not game_over and not human_turn:
-            AI_move = ChessAI.find_best_move(game_state, valid_moves)
+            AI_move, depth, evaluation = ChessAI.find_best_move(game_state, valid_moves)
+            engine_depth = depth  # Store depth for rendering
+            engine_evaluation = evaluation  # Store evaluation score
+
             if AI_move is None:
                 AI_move = ChessAI.find_random_move(valid_moves)
             game_state.make_move(AI_move)
@@ -108,7 +115,7 @@ def main():
             move_made = False
             animate = False
 
-        draw_game_state(screen, game_state, square_selected, move_log_font)
+        draw_game_state(screen, game_state, square_selected, move_log_font, engine_info_font, engine_depth, engine_evaluation)
 
         if game_state.checkmate or game_state.stalemate:
             game_over = True
@@ -116,18 +123,19 @@ def main():
                 text = 'Stalemate'
             else:
                 text = 'Black wins by checkmate' if game_state.white_to_move else 'White wins by checkmate'
-            draw_endgame_text(screen, text)
+            draw_engine_info(screen, text)
 
         clock.tick(max_fps)
         p.display.flip()
 
 
-def draw_game_state(screen, game_state, square_selected, move_log_font):
+def draw_game_state(screen, game_state, square_selected, move_log_font, engine_info_font, depth, evaluation):
     """Responsible for all graphics within a current game state"""
     draw_board(screen)  # Draws squares on the board
     highlight_squares(screen, game_state, square_selected)  # Adds highlighting
     draw_pieces(screen, game_state.board)  # Draws pieces on the board
     draw_move_log(screen, game_state, move_log_font)  # Draws the move log
+    draw_engine_info(screen, engine_info_font, depth, evaluation)  # Draw depth and evaluation
 
 
 def draw_board(screen):
@@ -232,16 +240,14 @@ def animate_move(move, screen, board, clock):
         clock.tick(60)  # Controls fame rate per second for the animation
 
 
-def draw_endgame_text(screen, text):
-    font = p.font.SysFont('Helvetica', 32, True, False)
-    text_object = font.render(text, True, p.Color('gray'), p.Color('mintcream'))
-    text_location = p.Rect(0, 0, board_width, board_height).move(board_width/2 - text_object.get_width()/2,
-                                                                 board_height/2 - text_object.get_height()/2)
-    screen.blit(text_object, text_location)
+def draw_engine_info(screen, font, depth, evaluation):
+    """Draws engine information such as current depth and evaluation."""
+    engine_info_area = p.Rect(board_width + 10, board_height - 40, move_log_panel_width - 20, 30)
+    p.draw.rect(screen, p.Color('black'), engine_info_area)
 
-    # Creates a shadowing effect
-    text_object = font.render(text, True, p.Color('black'))
-    screen.blit(text_object, text_location.move(2, 2))
+    text = f"Depth: {depth}, Eval: {evaluation / 100:.2f} (cp)"  # Convert evaluation to centipawns
+    text_object = font.render(text, True, p.Color('white'))
+    screen.blit(text_object, engine_info_area.move(5, 5))
 
 
 if __name__ == '__main__':
