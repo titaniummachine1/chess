@@ -3,7 +3,6 @@ from AI.piece_square_table import piece_square_tables, piece_values
 
 # Points for game outcome (in centipawns).
 checkmate_points = 100000  # 1000 points as centipawns (multiplied by 100)
-stalemate_points = 0
 
 def score_board(game_state):
     """Evaluates the board to return a score using PeSTO's evaluation."""
@@ -12,8 +11,6 @@ def score_board(game_state):
             return -checkmate_points  # Black wins
         else:
             return checkmate_points  # White wins
-    elif game_state.stalemate:
-        return stalemate_points
 
     mg_score, eg_score = 0, 0
     phase = 0  # Game phase indicator for tapering

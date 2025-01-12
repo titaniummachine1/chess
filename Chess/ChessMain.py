@@ -6,8 +6,8 @@ import AI.ChessAI as ChessAI  # Import AI functions
 import time
 
 # Player settings
-player_one = True  # White: Player
-player_two = False  # Black: AI
+player_one = False
+player_two = False
 
 p.init()
 
@@ -161,9 +161,9 @@ def main():
 
         draw_game_state(screen, game_state, square_selected, move_log_font)
 
-        if game_state.checkmate or game_state.stalemate:
+        if game_state.checkmate:
             game_over = True
-            text = 'Stalemate' if game_state.stalemate else f"{'Black' if game_state.white_to_move else 'White'} wins by checkmate"
+            text = f"{'Black' if game_state.white_to_move else 'White'} wins by checkmate"
             draw_endgame_text(screen, text)
 
         clock.tick(max_fps)
@@ -210,13 +210,7 @@ def draw_pieces(screen, board):
 def draw_move_log(screen, game_state, font):
     move_log_area = p.Rect(board_width, 0, move_log_panel_width, move_log_panel_height)
     p.draw.rect(screen, p.Color('#2d2d2e'), move_log_area)
-    move_log = game_state.move_log
     move_texts = []
-    for i in range(0, len(move_log), 2):
-        move_string = f'{i // 2 + 1}. {str(move_log[i])} '
-        if i + 1 < len(move_log):
-            move_string += f'{str(move_log[i + 1])} '
-        move_texts.append(move_string)
 
     move_per_row = 2
     padding = 5
