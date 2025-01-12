@@ -65,7 +65,7 @@ class GameState:
 
             # Player turn
             if (self.white_to_move and ChessMain.player_one) or (not self.white_to_move and ChessMain.player_two):
-                promoted_piece = input('Promote to Q(ueen), R(ook), B(ishop), or (k)N(ight):').upper()
+                promoted_piece = 'Q'
 
             else:  # AI turn
                 promoted_piece = 'Q'

@@ -1,16 +1,58 @@
-# Import piece-square tables and piece values from piece_square_table.py
-from AI.piece_square_table import piece_square_tables, piece_values
+from AI.evaluation import score_board
+import random
 
-# Depth of the algorithm determining AI moves. Higher set_depth == harder AI.
-set_depth = 4
-
-# Points for game outcome (in centipawns).
 checkmate_points = 100000  # 1000 points as centipawns (multiplied by 100)
-stalemate_points = 0
+set_depth = 4  # Search depth for Negamax
 
-# ------------------------------------------------------------------
-# Function to find the best move based on the current board state.
-# ------------------------------------------------------------------
+# Dictionary to store book moves {FEN: [(move, count), (move, count), ...]}
+book_moves = {}
+
+def load_book_moves():
+    """Loads book moves from Book.txt in the new format."""
+    current_fen = None
+    with open("Chess/AI/Book.txt", "r") as file:
+        for line in file:
+            line = line.strip()
+            if line.startswith("pos"):  # New FEN position
+                _, current_fen = line.split(" ", 1)
+                book_moves[current_fen] = []  # Initialize empty list for the FEN
+            else:
+                move, count = line.split()  # Extract move and its frequency
+                count = int(count)  # Convert count to integer
+                book_moves[current_fen].append((move, count))  # Store (move, count) as a tuple
+
+load_book_moves()  # Load book moves at the start
+
+def get_random_book_move(fen):
+    """Returns a random book move using weighted randomness based on frequency."""
+    if fen not in book_moves:
+        return None  # No book move available for this FEN
+
+    moves_with_counts = book_moves[fen]
+    moves, counts = zip(*moves_with_counts)  # Unpack moves and counts
+    total_count = sum(counts)
+
+    # Normalize counts to probabilities
+    probabilities = [count / total_count for count in counts]
+
+    # Weighted random choice of move based on frequencies
+    chosen_move = random.choices(moves, weights=probabilities, k=1)[0]
+    return chosen_move
+
+def find_best_move_from_fen(game_state):
+    """Reads FEN, generates valid moves, and finds the best move."""
+    fen = game_state.get_fen()  # Get FEN from your GameState class
+    book_move = get_random_book_move(fen)  # Get a random weighted book move
+    
+    if book_move:
+        print(f"Playing book move: {book_move}")
+        return book_move  # Play a random weighted book move
+
+    # If no book move, fallback to AI move
+    valid_moves = game_state.get_valid_moves()
+    best_move = find_best_move(game_state, valid_moves)
+    return best_move
+
 def find_best_move(game_state, valid_moves):
     """Find the best move using Negamax with Alpha-Beta pruning."""
     global next_move
@@ -19,14 +61,9 @@ def find_best_move(game_state, valid_moves):
                                 1 if game_state.white_to_move else -1)
     return next_move
 
-
 def find_negamax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, turn_multiplier):
-    """
-    Negamax algorithm with alpha-beta pruning.
-    turn_multiplier: 1 for white, -1 for black.
-    """
+    """Negamax algorithm with alpha-beta pruning."""
     global next_move
-
     if depth == 0:
         return turn_multiplier * score_board(game_state)
 
@@ -40,7 +77,7 @@ def find_negamax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, tur
         if score > max_score:
             max_score = score
             if depth == set_depth:
-                next_move = move  # Store the best move at the root level.
+                next_move = move
 
         # Alpha-beta pruning
         alpha = max(alpha, max_score)
@@ -48,44 +85,3 @@ def find_negamax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, tur
             break
 
     return max_score
-
-
-# ------------------------------------------------------------------
-# Board Evaluation Function
-# ------------------------------------------------------------------
-def score_board(game_state):
-    """Evaluates the board to return a score using PeSTO's evaluation."""
-    if game_state.checkmate:
-        if game_state.white_to_move:
-            return -checkmate_points  # Black wins
-        else:
-            return checkmate_points  # White wins
-    elif game_state.stalemate:
-        return stalemate_points
-
-    mg_score, eg_score = 0, 0
-    phase = 0  # Game phase indicator for tapering
-
-    for row in range(8):
-        for col in range(8):
-            piece = game_state.board[row][col]
-            if piece != '--':  # Ignore empty squares
-                piece_type = piece[1].upper()  # 'P', 'N', etc.
-                color = 'w' if piece[0] == 'w' else 'b'
-                index = row * 8 + col  # Convert 2D board index to 1D
-
-                if color == 'w':
-                    mg_score += piece_values[piece_type][0] + piece_square_tables['mg'][piece_type][index]
-                    eg_score += piece_values[piece_type][1] + piece_square_tables['eg'][piece_type][index]
-                    phase += 1 if piece_type not in ["P", "K"] else 0  # Add phase for non-pawns
-                else:
-                    mg_score -= piece_values[piece_type][0] + piece_square_tables['mg'][piece_type][63 - index]
-                    eg_score -= piece_values[piece_type][1] + piece_square_tables['eg'][piece_type][63 - index]
-                    phase += 1 if piece_type not in ["P", "K"] else 0  # Add phase for non-pawns
-
-    # Tapered evaluation between midgame and endgame
-    mg_phase = min(phase, 24)  # Midgame phase indicator (max 24)
-    eg_phase = 24 - mg_phase  # Endgame phase is inverse of midgame phase
-
-    # Weighted average of midgame and endgame scores
-    return (mg_score * mg_phase + eg_score * eg_phase) // 24
