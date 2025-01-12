@@ -1,37 +1,15 @@
+# Import piece-square tables and piece values from piece_square_table.py
+from AI.piece_square_table import piece_square_tables, piece_values
 
 # Depth of the algorithm determining AI moves. Higher set_depth == harder AI.
 set_depth = 4
 
-# Points for game outcome.
-checkmate_points = 1000
+# Points for game outcome (in centipawns).
+checkmate_points = 100000  # 1000 points as centipawns (multiplied by 100)
 stalemate_points = 0
 
-piece_scores = {'K': 200.0, 'Q': 9.0, 'R': 5.0, 'B': 3.3, 'N': 3.2, 'P': 1.0}
-
-piece_positions = {
-    'wP': [  # White pawns
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-        [1.0, 1.0, 2.0, 3.0, 3.0, 2.0, 1.0, 1.0],
-        [0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5],
-        [0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0],
-        [0.5, -0.5, -1.0, 0.0, 0.0, -1.0, -0.5, 0.5],
-        [0.5, 1.0, 1.0, -2.0, -2.0, 1.0, 1.0, 0.5],
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
-    'bP': [  # Black pawns
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.5, 1.0, 1.0, -2.0, -2.0, 1.0, 1.0, 0.5],
-        [0.5, -0.5, -1.0, 0.0, 0.0, -1.0, -0.5, 0.5],
-        [0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0],
-        [0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5],
-        [1.0, 1.0, 2.0, 3.0, 3.0, 2.0, 1.0, 1.0],
-        [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
-    # Position tables for other pieces can be added here...
-}
-
 # ------------------------------------------------------------------
-# Function to find the best move based on current board state.
+# Function to find the best move based on the current board state.
 # ------------------------------------------------------------------
 def find_best_move(game_state, valid_moves):
     """Find the best move using Negamax with Alpha-Beta pruning."""
@@ -76,7 +54,7 @@ def find_negamax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, tur
 # Board Evaluation Function
 # ------------------------------------------------------------------
 def score_board(game_state):
-    """Evaluates the board to return a score."""
+    """Evaluates the board to return a score using PeSTO's evaluation."""
     if game_state.checkmate:
         if game_state.white_to_move:
             return -checkmate_points  # Black wins
@@ -85,14 +63,29 @@ def score_board(game_state):
     elif game_state.stalemate:
         return stalemate_points
 
-    score = 0
+    mg_score, eg_score = 0, 0
+    phase = 0  # Game phase indicator for tapering
+
     for row in range(8):
         for col in range(8):
             piece = game_state.board[row][col]
             if piece != '--':  # Ignore empty squares
-                piece_value = piece_scores.get(piece[1], 0)
-                if piece[0] == 'w':
-                    score += piece_value + piece_positions.get(piece, [[0] * 8 for _ in range(8)])[row][col]
+                piece_type = piece[1].upper()  # 'P', 'N', etc.
+                color = 'w' if piece[0] == 'w' else 'b'
+                index = row * 8 + col  # Convert 2D board index to 1D
+
+                if color == 'w':
+                    mg_score += piece_values[piece_type][0] + piece_square_tables['mg'][piece_type][index]
+                    eg_score += piece_values[piece_type][1] + piece_square_tables['eg'][piece_type][index]
+                    phase += 1 if piece_type not in ["P", "K"] else 0  # Add phase for non-pawns
                 else:
-                    score -= piece_value + piece_positions.get(piece, [[0] * 8 for _ in range(8)])[row][col]
-    return score
+                    mg_score -= piece_values[piece_type][0] + piece_square_tables['mg'][piece_type][63 - index]
+                    eg_score -= piece_values[piece_type][1] + piece_square_tables['eg'][piece_type][63 - index]
+                    phase += 1 if piece_type not in ["P", "K"] else 0  # Add phase for non-pawns
+
+    # Tapered evaluation between midgame and endgame
+    mg_phase = min(phase, 24)  # Midgame phase indicator (max 24)
+    eg_phase = 24 - mg_phase  # Endgame phase is inverse of midgame phase
+
+    # Weighted average of midgame and endgame scores
+    return (mg_score * mg_phase + eg_score * eg_phase) // 24
