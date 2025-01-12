@@ -134,6 +134,7 @@ def main():
             elif event.type == p.KEYDOWN:
                 if event.key == p.K_z:  # Undo move
                     game_state.undo_move()
+                    game_state.undo_move()
                     move_made = True
                     animate = False
                     game_over = False
