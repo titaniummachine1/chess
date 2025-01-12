@@ -5,7 +5,7 @@ import random
 import threading  # To use threading.Lock if not already imported
 
 checkmate_points = 100000  # 1000 points as centipawns (multiplied by 100)
-set_depth = 4  # Max depth for iterative deepening
+set_depth = 5  # Max depth for iterative deepening
 
 # Dictionary to store book moves {FEN: [(move, count), (move, count), ...]}
 book_moves = {}

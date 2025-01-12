@@ -14,7 +14,7 @@ p.init()
 board_width = board_height = 680
 dimension = 8
 sq_size = board_height // dimension
-max_fps = 15
+max_fps = 60
 images = {}
 colours = [p.Color('#EBEBD0'), p.Color('#769455')]
 
@@ -92,7 +92,6 @@ def main():
     game_state = ChessEngine.GameState()
     valid_moves = game_state.get_valid_moves()
     move_made = False
-    animate = False
     load_images()
     running = True
     square_selected = ()
@@ -124,7 +123,6 @@ def main():
                                 game_state.make_move(valid_moves[i])
                                 move_log_font = p.font.SysFont('Arial', 14, False, False)
                                 move_made = True
-                                animate = True
                                 square_selected = ()
                                 player_clicks = []
                                 break
@@ -136,7 +134,6 @@ def main():
                     game_state.undo_move()
                     game_state.undo_move()
                     move_made = True
-                    animate = False
                     game_over = False
                 if event.key == p.K_r:  # Reset game
                     game_state = ChessEngine.GameState()
@@ -144,7 +141,6 @@ def main():
                     square_selected = ()
                     player_clicks = []
                     move_made = False
-                    animate = False
                     game_over = False
 
         if not game_over and not human_turn and not ChessAI.is_computing and ChessAI.best_move is None:
@@ -156,16 +152,12 @@ def main():
             # AI has finished computing its move
             game_state.make_move(ChessAI.best_move)
             move_made = True
-            animate = True
             ChessAI.best_move = None
             valid_moves = game_state.get_valid_moves()
 
         if move_made:
-            if animate:
-                animate_move(game_state.move_log[-1], screen, game_state.board, clock)
             valid_moves = game_state.get_valid_moves()
             move_made = False
-            animate = False
 
         draw_game_state(screen, game_state, square_selected, move_log_font)
 
@@ -239,24 +231,6 @@ def draw_move_log(screen, game_state, font):
         text_location = move_log_area.move(padding, text_y)
         screen.blit(text_object, text_location)
         text_y += text_object.get_height() + line_spacing
-
-def animate_move(move, screen, board, clock):
-    delta_row = move.end_row - move.start_row
-    delta_column = move.end_column - move.start_column
-    frames_per_square = 5
-    frame_count = (abs(delta_row) + abs(delta_column)) * frames_per_square
-
-    for frame in range(frame_count + 1):
-        row = move.start_row + delta_row * frame / frame_count
-        column = move.start_column + delta_column * frame / frame_count
-        draw_board(screen)
-        draw_pieces(screen, board)
-        # Redraw the moving piece
-        moving_piece = board[move.end_row][move.end_column]
-        if moving_piece != '--':
-            screen.blit(images[moving_piece], p.Rect(column * sq_size, row * sq_size, sq_size, sq_size))
-        p.display.flip()
-        clock.tick(60)
 
 def draw_endgame_text(screen, text):
     font = p.font.SysFont('Helvetica', 32, True, False)
