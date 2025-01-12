@@ -1,5 +1,6 @@
 import pygame as p
-from Chess import ChessEngine, ChessAI
+import ChessEngine # Import from the same folder
+import AI.ChessAI as ChessAI  # Import AI functions
 
 # Player settings. Turn player_one to True to play as white and/or player_two to True to play black.
 player_one = True  # If the AI is playing white, then False
@@ -20,11 +21,12 @@ move_log_panel_height = board_height
 
 
 def load_images():
-    """Initialize a global dictionary of images"""
-    pieces = ['bR', 'bN', 'bB', 'bQ', 'bK', 'bB', 'bN', 'bR', 'bP',
-              'wR', 'wN', 'wB', 'wQ', 'wK', 'wB', 'wN', 'wR', 'wP']
+    """Initialize a global dictionary of images."""
+    pieces = ['bR', 'bN', 'bB', 'bQ', 'bK', 'bP',
+              'wR', 'wN', 'wB', 'wQ', 'wK', 'wP']
     for piece in pieces:
-        images[piece] = p.transform.smoothscale(p.image.load(f'images/{piece}.png'), (sq_size, sq_size))
+        images[piece] = p.transform.smoothscale(
+            p.image.load(f'Chess/images/{piece}.png'), (sq_size, sq_size))
 
 
 def main():
