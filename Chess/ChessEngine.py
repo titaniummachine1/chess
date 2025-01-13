@@ -54,6 +54,7 @@ class GameState:
         self.board[move.end_row][move.end_column] = move.piece_moved  # Moves piece to new location
         self.move_log.append(move)  # Logs move
 
+        ##track king position
         if move.piece_moved == 'wK':
             self.white_king_location = (move.end_row, move.end_column)
         elif move.piece_moved == 'bK':
@@ -140,6 +141,17 @@ class GameState:
                     self.board[move.end_row][move.end_column + 1] = '--'
 
             self.checkmate = False
+            
+    def get_all_possible_moves(self):
+        """Gets all moves without considering checks"""
+        moves = []
+        for row in range(len(self.board)):  # Number of rows
+            for column in range(len(self.board[row])):  # Number of columns in each row
+                turn = self.board[row][column][0]
+                if (turn == 'w' and self.white_to_move) or (turn == 'b' and not self.white_to_move):
+                    piece = self.board[row][column][1]
+                    self.move_functions[piece](row, column, moves)  # Calls move function based on piece type
+        return moves
 
     def get_valid_moves(self):
         """Gets all possible moves without considering checks or pins and checks for king presence."""
@@ -162,19 +174,6 @@ class GameState:
             return []
 
         return valid_moves
-
-
-
-    def get_all_possible_moves(self):
-        """Gets all moves without considering checks"""
-        moves = []
-        for row in range(len(self.board)):  # Number of rows
-            for column in range(len(self.board[row])):  # Number of columns in each row
-                turn = self.board[row][column][0]
-                if (turn == 'w' and self.white_to_move) or (turn == 'b' and not self.white_to_move):
-                    piece = self.board[row][column][1]
-                    self.move_functions[piece](row, column, moves)  # Calls move function based on piece type
-        return moves
 
     def get_pawn_moves(self, row, column, moves):
         """Gets all pawn moves for the pawn located at (row, column) and adds moves to move log"""

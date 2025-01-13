@@ -38,66 +38,11 @@ piece_values = {
     'bK': 0
 }
 
-def load_book_moves():
-    """Loads book moves from Book.txt in the new format."""
-    current_fen = None
-    with open("Chess/AI/Book.txt", "r") as file:
-        for line in file:
-            line = line.strip()
-            if line.startswith("pos"):  # New FEN position
-                _, current_fen = line.split(" ", 1)
-                book_moves[current_fen] = []  # Initialize empty list for the FEN
-            else:
-                move, count = line.split()  # Extract move and its frequency
-                count = int(count)  # Convert count to integer
-                book_moves[current_fen].append((move, count))  # Store (move, count) as a tuple
-
-load_book_moves()  # Load book moves at the start
-
-def get_random_book_move(fen):
-    """Returns a random book move using weighted randomness based on frequency."""
-    if fen not in book_moves:
-        return None  # No book move available for this FEN
-
-    moves_with_counts = book_moves[fen]
-    moves, counts = zip(*moves_with_counts)  # Unpack moves and counts
-    total_count = sum(counts)
-
-    # Normalize counts to probabilities
-    probabilities = [count / total_count for count in counts]
-
-    # Shuffle the move list to prevent predictable results for same-weight moves
-    move_and_probabilities = list(zip(moves, probabilities))
-    random.shuffle(move_and_probabilities)
-    moves, probabilities = zip(*move_and_probabilities)
-
-    # Weighted random choice of move based on frequencies
-    chosen_move = random.choices(moves, weights=probabilities, k=1)[0]
-    return chosen_move
-
 def score_move(move):
     """Assign a score to a move based on capture and piece value."""
     if move.piece_captured != '--':
         return piece_values.get(move.piece_captured, 0)
     return 0  # Non-captures have a lower priority
-
-def find_best_move_from_fen(game_state):
-    """Reads FEN, generates valid moves, and finds the best move."""
-    fen = game_state.get_fen()  # Get FEN from your GameState class
-    book_move = get_random_book_move(fen)  # Get a random weighted book move
-
-    if book_move:
-        print(f"Playing book move: {book_move}")
-        return book_move, 0, 0  # No depth or evaluation for book move
-
-    # If no book move, fallback to AI move
-    valid_moves = game_state.get_valid_moves()
-
-    if not valid_moves:
-        return None, 0, 0  # No valid moves available
-
-    best_move, depth_reached, eval_score = find_best_move(game_state, valid_moves)
-    return best_move, depth_reached, eval_score
 
 def find_best_move(game_state, valid_moves):
     """Find the best move using iterative deepening with Negamax and Alpha-Beta pruning."""

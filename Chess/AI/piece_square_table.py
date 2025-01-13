@@ -135,3 +135,23 @@ piece_square_tables = {
         ]
     }
 }
+
+# Pre-flipped piece-square tables for black
+flipped_piece_square_tables = {
+    "mg": {
+        "P": list(reversed(piece_square_tables["mg"]["P"])),
+        "N": list(reversed(piece_square_tables["mg"]["N"])),
+        "B": list(reversed(piece_square_tables["mg"]["B"])),
+        "R": list(reversed(piece_square_tables["mg"]["R"])),
+        "Q": list(reversed(piece_square_tables["mg"]["Q"])),
+        "K": list(reversed(piece_square_tables["mg"]["K"]))
+    },
+    "eg": {
+        "P": list(reversed(piece_square_tables["eg"]["P"])),
+        "N": list(reversed(piece_square_tables["eg"]["N"])),
+        "B": list(reversed(piece_square_tables["eg"]["B"])),
+        "R": list(reversed(piece_square_tables["eg"]["R"])),
+        "Q": list(reversed(piece_square_tables["eg"]["Q"])),
+        "K": list(reversed(piece_square_tables["eg"]["K"]))
+    }
+}

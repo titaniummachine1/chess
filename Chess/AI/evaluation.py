@@ -1,5 +1,5 @@
 # evaluation.py
-from AI.piece_square_table import piece_square_tables, piece_values
+from AI.piece_square_table import piece_square_tables, piece_values, flipped_piece_square_tables
 
 # Points for game outcome (in centipawns).
 checkmate_points = 100000  # 1000 points as centipawns (multiplied by 100)
@@ -28,8 +28,8 @@ def score_board(game_state):
                     eg_score += piece_values[piece_type][1] + piece_square_tables['eg'][piece_type][index]
                     phase += 1 if piece_type not in ["P", "K"] else 0  # Add phase for non-pawns
                 else:
-                    mg_score -= piece_values[piece_type][0] + piece_square_tables['mg'][piece_type][63 - index]
-                    eg_score -= piece_values[piece_type][1] + piece_square_tables['eg'][piece_type][63 - index]
+                    mg_score -= piece_values[piece_type][0] + flipped_piece_square_tables['mg'][piece_type][63 - index]
+                    eg_score -= piece_values[piece_type][1] + flipped_piece_square_tables['eg'][piece_type][63 - index]
                     phase += 1 if piece_type not in ["P", "K"] else 0  # Add phase for non-pawns
 
     # Tapered evaluation between midgame and endgame
