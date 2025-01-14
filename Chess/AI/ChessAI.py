@@ -1,4 +1,4 @@
-from AI.evaluation import score_board
+from AI.evaluation import score_board, piece_values
 import random
 import threading  # To use threading.Lock for thread safety
 
@@ -17,32 +17,37 @@ lock = threading.Lock()
 # Stop analysis flag
 stop_analysis = False
 
-# Piece values for scoring (in centipawns)
-piece_values = {
-    'wP': 100,  # White pawn
-    'bP': 100,  # Black pawn
-    'wN': 320,  # White knight
-    'bN': 320,  # Black knight
-    'wB': 330,  # White bishop
-    'bB': 330,  # Black bishop
-    'wR': 500,  # White rook
-    'bR': 500,  # Black rook
-    'wQ': 900,  # White queen
-    'bQ': 900,  # Black queen
-    'wK': 0,    # White king (invaluable)
-    'bK': 0     # Black king (invaluable)
-}
+# Function to score moves based on checks, captures, and material (MVV-LVA)
+def score_move(move, game_state):
+    """
+    Assign a score to a move:
+    - High score for checks
+    - MVV-LVA for captures (victim vs attacker)
+    - Penalty for pawn moves unless promoting or critical center
+    """
+    score = 0
 
-# Function to score moves based on Most Valuable Victim-Least Valuable Attacker (MVV-LVA)
-def score_move(move):
-    """Assign a score to a move based on MVV-LVA."""
-    if move.piece_captured != '--':  # If a piece is captured
-        victim_value = piece_values.get(move.piece_captured, 0)
-        attacker_value = piece_values.get(move.piece_moved, 0)
-        return victim_value * 10 - attacker_value  # Prioritize capturing valuable pieces
-    return 0  # Non-capturing moves have lower priority
+    # Check if the move is a check
+    game_state.make_move(move)
+    is_check = game_state.in_check  # Check if the king is under attack after the move
+    game_state.undo_move()
 
-# Iterative deepening with minimax search
+    if is_check:
+        score += 10000  # High score for moves that put the opponent in check
+
+    # If it's a capture, apply MVV-LVA logic
+    if move.piece_captured != '--':
+        victim_value = piece_values.get(move.piece_captured[1].upper(), (0, 0))[0]  # Midgame value
+        attacker_value = piece_values.get(move.piece_moved[1].upper(), (0, 0))[0]  # Midgame value
+        score += (victim_value * 10 - attacker_value)
+
+    # Small penalty for non-piece moves (prioritize moving pieces over pawns)
+    if move.piece_moved[1].upper() == 'P':  # If it's a pawn move
+        score -= 10  # Penalize non-promotion pawn moves slightly
+
+    return score
+
+# Iterative deepening with minimax and alpha-beta pruning
 def find_best_move(game_state, valid_moves):
     """Find the best move using minimax with alpha-beta pruning."""
     global current_depth, current_evaluation, positions_analyzed, best_move_found, stop_analysis
@@ -76,9 +81,12 @@ def minimax_with_alpha_beta(game_state, valid_moves, depth, maximizing_player, a
             positions_analyzed += 1  # Count analyzed positions
         return evaluation
 
+    # Sort moves based on their improved scoring function
+    sorted_moves = sorted(valid_moves, key=lambda move: score_move(move, game_state), reverse=True)
+
     if maximizing_player:
         max_eval = -checkmate_points
-        for move in sorted(valid_moves, key=score_move, reverse=True):  # Sort moves by MVV-LVA for better pruning
+        for move in sorted_moves:
             with lock:
                 if stop_analysis:
                     return 0
@@ -101,7 +109,7 @@ def minimax_with_alpha_beta(game_state, valid_moves, depth, maximizing_player, a
 
     else:
         min_eval = checkmate_points
-        for move in sorted(valid_moves, key=score_move, reverse=True):
+        for move in sorted_moves:
             with lock:
                 if stop_analysis:
                     return 0
