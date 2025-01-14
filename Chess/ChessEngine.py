@@ -169,7 +169,6 @@ class GameState:
         valid_moves = self.get_all_possible_moves()
 
         if len(valid_moves) == 0:  # No legal moves
-            print(f"{'White' if self.white_to_move else 'Black'} has no legal moves and loses!")
             self.checkmate = True  # Game over due to no legal moves
             return []
 

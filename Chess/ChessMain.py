@@ -3,7 +3,6 @@ import threading  # For the progress window and AI computation
 import tkinter as tk  # For the progress window
 import ChessEngine
 import AI.ChessAI as ChessAI  # Import AI functions
-import time
 
 # Player settings
 player_one = True

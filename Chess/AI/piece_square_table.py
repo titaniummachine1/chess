@@ -136,22 +136,16 @@ piece_square_tables = {
     }
 }
 
+def flip_table_for_black(table):
+    """Correctly flip the 8x8 table for black."""
+    flipped = []
+    for i in range(8):
+        row = table[i * 8:(i + 1) * 8]  # Extract the row
+        flipped.insert(0, row[::-1])  # Reverse the row and insert at the top
+    return sum(flipped, [])  # Flatten the flipped 8x8 list back into a 1D list
+
 # Pre-flipped piece-square tables for black
 flipped_piece_square_tables = {
-    "mg": {
-        "P": list(reversed(piece_square_tables["mg"]["P"])),
-        "N": list(reversed(piece_square_tables["mg"]["N"])),
-        "B": list(reversed(piece_square_tables["mg"]["B"])),
-        "R": list(reversed(piece_square_tables["mg"]["R"])),
-        "Q": list(reversed(piece_square_tables["mg"]["Q"])),
-        "K": list(reversed(piece_square_tables["mg"]["K"]))
-    },
-    "eg": {
-        "P": list(reversed(piece_square_tables["eg"]["P"])),
-        "N": list(reversed(piece_square_tables["eg"]["N"])),
-        "B": list(reversed(piece_square_tables["eg"]["B"])),
-        "R": list(reversed(piece_square_tables["eg"]["R"])),
-        "Q": list(reversed(piece_square_tables["eg"]["Q"])),
-        "K": list(reversed(piece_square_tables["eg"]["K"]))
-    }
+    "mg": {piece: flip_table_for_black(piece_square_tables["mg"][piece]) for piece in piece_square_tables["mg"]},
+    "eg": {piece: flip_table_for_black(piece_square_tables["eg"][piece]) for piece in piece_square_tables["eg"]}
 }
