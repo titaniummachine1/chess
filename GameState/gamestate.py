@@ -14,7 +14,7 @@ class GameState:
 
         self.current_turn = Color.WHITE
         self.castling_rights = {'K': True, 'Q': True, 'k': True, 'q': True}
-        self.en_passant_sq = -1
+        self.en_passant_sq = None
         self.move_log = []
         self.board_ui = [['--' for _ in range(8)] for _ in range(8)]
 
@@ -79,7 +79,6 @@ class GameState:
         self.combined_color[Color.WHITE] = sum(self.pieces[Color.WHITE])
         self.combined_color[Color.BLACK] = sum(self.pieces[Color.BLACK])
         self.combined_all = self.combined_color[Color.WHITE] | self.combined_color[Color.BLACK]
-        print(f"DEBUG: update_bitboards -> combined_all={self.combined_all}")
 
     def update_board_ui(self):
         piece_fen_map = {
@@ -100,15 +99,11 @@ class GameState:
             for c in range(8):
                 piece_data = self.get_piece_at(r, c)
                 self.board_ui[r][c] = piece_fen_map.get(piece_data, "--") if piece_data else "--"
-        print("DEBUG: update_board_ui -> board_ui:")
-        for row_line in self.board_ui:
-            print("DEBUG: ", row_line)
 
     def apply_move(self, move):
         new_state = self.copy()
 
         start_sq, end_sq, promotion = move
-        print(f"DEBUG: apply_move -> start_sq={start_sq}, end_sq={end_sq}, promotion={promotion}")
 
         color_piece = new_state.get_piece_at(*Bitboard.from_square(start_sq))
         if not color_piece:
@@ -124,27 +119,23 @@ class GameState:
         return new_state
 
     def _remove_occupant_if_any(self, end_sq, piece_type, color):
-        print(f"DEBUG: _remove_occupant_if_any -> end_sq={end_sq}, piece_type={piece_type}, color={color}")
         self.en_passant_sq = -1
         occupant = self.get_piece_at(*Bitboard.from_square(end_sq))
         if occupant:
             occ_color, occ_piece_type = occupant
-            print(f"DEBUG: occupant found -> color={occ_color}, piece_type={occ_piece_type} at end_sq={end_sq}")
             self.pieces[occ_color][occ_piece_type] = Bitboard.clear_bit(
                 self.pieces[occ_color][occ_piece_type], end_sq
             )
-        else:
+        else: ##en passont
             if piece_type == Piece.PAWN and end_sq == self.en_passant_sq:
                 direction = 8 if color == Color.BLACK else -8
                 captured_sq = end_sq + direction
                 opp_color = ~color
-                print(f"DEBUG: en passant capture -> removing pawn of color={opp_color} at {captured_sq}")
                 self.pieces[opp_color][Piece.PAWN] = Bitboard.clear_bit(
                     self.pieces[opp_color][Piece.PAWN], captured_sq
                 )
 
     def _move_piece(self, start_sq, end_sq, piece_type, color):
-        print(f"DEBUG: _move_piece -> from={start_sq}, to={end_sq}, piece_type={piece_type}, color={color}")
         self.pieces[color][piece_type] = Bitboard.clear_bit(
             self.pieces[color][piece_type], start_sq
         )
@@ -153,23 +144,19 @@ class GameState:
         )
 
     def _handle_special_moves(self, start_sq, end_sq, piece_type, color, promotion):
-        print(f"DEBUG: _handle_special_moves -> piece_type={piece_type}, color={color}, start_sq={start_sq}, end_sq={end_sq}")
         if piece_type == Piece.PAWN:
             start_row = start_sq // 8
             end_row = end_sq // 8
             if abs(end_row - start_row) == 2:
                 if color == Color.WHITE:
                     self.en_passant_sq = start_sq + 8
-                    print(f"DEBUG: double push (WHITE) -> en_passant_sq set to {self.en_passant_sq}")
                 else:
                     self.en_passant_sq = start_sq - 8
-                    print(f"DEBUG: double push (BLACK) -> en_passant_sq set to {self.en_passant_sq}")
 
         if piece_type == Piece.PAWN:
             end_row = end_sq // 8
             if (color == Color.WHITE and end_row == 7) or (color == Color.BLACK and end_row == 0):
                 promo_piece = promotion if promotion is not None else Piece.QUEEN
-                print(f"DEBUG: pawn promotion -> new piece={promo_piece}")
                 self.pieces[color][Piece.PAWN] = Bitboard.clear_bit(
                     self.pieces[color][Piece.PAWN], end_sq
                 )
@@ -180,7 +167,6 @@ class GameState:
         if piece_type == Piece.KING:
             if color == Color.WHITE:
                 if start_sq == 4 and end_sq == 6 and self.castling_rights['K']:
-                    print("DEBUG: castling (WHITE) kingside")
                     self.pieces[Color.WHITE][Piece.ROOK] = Bitboard.clear_bit(
                         self.pieces[Color.WHITE][Piece.ROOK], 7
                     )
@@ -188,7 +174,6 @@ class GameState:
                         self.pieces[Color.WHITE][Piece.ROOK], 5
                     )
                 elif start_sq == 4 and end_sq == 2 and self.castling_rights['Q']:
-                    print("DEBUG: castling (WHITE) queenside")
                     self.pieces[Color.WHITE][Piece.ROOK] = Bitboard.clear_bit(
                         self.pieces[Color.WHITE][Piece.ROOK], 0
                     )
@@ -199,7 +184,6 @@ class GameState:
                 self.castling_rights['Q'] = False
             else:
                 if start_sq == 60 and end_sq == 62 and self.castling_rights['k']:
-                    print("DEBUG: castling (BLACK) kingside")
                     self.pieces[Color.BLACK][Piece.ROOK] = Bitboard.clear_bit(
                         self.pieces[Color.BLACK][Piece.ROOK], 63
                     )
@@ -207,7 +191,6 @@ class GameState:
                         self.pieces[Color.BLACK][Piece.ROOK], 61
                     )
                 elif start_sq == 60 and end_sq == 58 and self.castling_rights['q']:
-                    print("DEBUG: castling (BLACK) queenside")
                     self.pieces[Color.BLACK][Piece.ROOK] = Bitboard.clear_bit(
                         self.pieces[Color.BLACK][Piece.ROOK], 56
                     )
@@ -234,12 +217,10 @@ class GameState:
                     self.castling_rights['k'] = False
 
     def _finalize_move(self, move):
-        print("DEBUG: _finalize_move -> performing final updates")
         self.update_bitboards()
         self.update_board_ui()
         self.current_turn = ~self.current_turn
         self.move_log.append(move)
-        print(f"DEBUG: now turn={self.current_turn}, move_log={self.move_log}")
 
     def copy(self):
         new_state = GameState.__new__(GameState)

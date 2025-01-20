@@ -7,7 +7,8 @@ import pygame as p
 WIDTH, HEIGHT = 680, 680
 DIMENSION = 8  # Chessboard size (8x8)
 SQ_SIZE = HEIGHT // DIMENSION
-FPS = 24
+FPS = 60
+load_images()  # Load piece images
 
 def main():
     """Main game loop for the chess program."""
@@ -15,7 +16,6 @@ def main():
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
     game_state = GameState()  # Initialize game state
-    load_images()  # Load piece images
 
     running = True
     flipped = True  # White at bottom
