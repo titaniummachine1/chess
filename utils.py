@@ -1,23 +1,26 @@
 import pygame as p
-from bitboard import Bitboard
-from GameState.constants import Color, Piece
-import movegen  # Import move generation module
+import os
+import chess
 
 IMAGES = {}
+SQ_SIZE = 680 // 8  # If you prefer, pass dimension from outside
 
-# **Load Chess Piece Images**
 def load_images():
-    """Load chess piece images for UI rendering."""
+    """
+    Load chess piece images into IMAGES dict, e.g. IMAGES['wP'].
+    Adjust the path as needed to point to your 'images' folder.
+    """
     global IMAGES
+    # If your filenames are e.g. wP.png, bK.png, etc.
     pieces = ['wP', 'wR', 'wN', 'wB', 'wQ', 'wK', 'bP', 'bR', 'bN', 'bB', 'bQ', 'bK']
-    for piece in pieces:
-        IMAGES[piece] = p.transform.smoothscale(
-            p.image.load(f'images/{piece}.png'), (680 // 8, 680 // 8)
-        )
+    for piece_key in pieces:
+        # images/wP.png etc.
+        img_path = os.path.join('images', f'{piece_key}.png')
+        image_surf = p.image.load(img_path)
+        IMAGES[piece_key] = p.transform.smoothscale(image_surf, (SQ_SIZE, SQ_SIZE))
 
-# **Draw Board**
-def draw_board(screen, width=680, height=680, dimension=8):
-    """Draw the chessboard."""
+def draw_board(screen, dimension=8, width=680, height=680):
+    """Draw an 8x8 chessboard (alternating squares)."""
     sq_size = height // dimension
     white = p.Color('#EBEBD0')
     dark = p.Color('#769455')
@@ -27,129 +30,117 @@ def draw_board(screen, width=680, height=680, dimension=8):
             color = white if (row + col) % 2 == 0 else dark
             p.draw.rect(screen, color, p.Rect(col * sq_size, row * sq_size, sq_size, sq_size))
 
-# **Draw Pieces**
-def draw_pieces(screen, game_state, flipped=False, dimension=8):
-    """Draw chess pieces based on the correct game state, supporting board flipping."""
-    sq_size = 680 // dimension
-
-    for r in range(dimension):
-        for c in range(dimension):
-            display_r = 7 - r if flipped else r
-            display_c = 7 - c if flipped else c
-
-            piece_key = game_state.board_ui[r][c]  # Read from board_ui (FEN-style)
-            if piece_key in IMAGES:
-                screen.blit(IMAGES[piece_key], p.Rect(display_c * sq_size, display_r * sq_size, sq_size, sq_size))
-
-# **Apply Move (Only If Legal)**
-def apply_legal_move(game_state, move):
+def draw_pieces(screen, board_obj, flipped=False, dimension=8):
     """
-    Move a piece *only if the move is legal*.
-    `move` is expected as ((start_row, start_col), (end_row, end_col)).
+    Render the pieces from a python-chess.Board on the squares.
+    If flipped=True, draw from black's perspective.
+    """
+    sq_size = 680 // dimension
+    for sq in chess.SQUARES:  # 0..63, a8=0 -> h1=63
+        piece = board_obj.piece_at(sq)
+        if piece:
+            # piece.symbol() => 'P','p','R','r', etc.
+            # piece.color => True (white) or False (black)
+            row = sq // 8  # 0 for rank 8, 7 for rank 1
+            col = sq % 8
+            # If flipped, invert row,col
+            if flipped:
+                draw_row = 7 - row
+                draw_col = 7 - col
+            else:
+                draw_row = row
+                draw_col = col
+
+            # 'w' or 'b' 
+            color_char = 'w' if piece.color == chess.WHITE else 'b'
+            # 'P','N','B','R','Q','K' (uppercase)
+            piece_type = piece.symbol().upper()
+            image_key = color_char + piece_type  # e.g. 'wR'
+
+            if image_key in IMAGES:
+                screen.blit(IMAGES[image_key], p.Rect(draw_col * sq_size, draw_row * sq_size, sq_size, sq_size))
+
+def apply_legal_move(board_obj, move):
+    """
+    Attempt to push a move onto a python-chess.Board if it's legal.
+    `move` is a tuple: ((start_row, start_col), (end_row, end_col))
+
+    We'll convert that into a python-chess Move and if it's in board_obj.legal_moves,
+    we do board_obj.push(move). 
     """
     (start_row, start_col), (end_row, end_col) = move
 
-    # Convert row,col to bitboard square indices
-    square_start = game_state.get_square(start_row, start_col)
-    square_end   = game_state.get_square(end_row, end_col)
+    # Convert to python-chess square
+    # python-chess: row=0 => a8, row=7 => a1 
+    # so the square index = row*8 + col
+    start_sq = start_row * 8 + start_col
+    end_sq = end_row * 8 + end_col
 
-    # Generate *all* legal moves in bitboard form
-    legal_moves = set(movegen.generate_legal_moves(game_state))
+    candidate = chess.Move(start_sq, end_sq)
 
-    # Check if the bitboard tuple is in legal_moves
-    if (square_start, square_end, None) not in legal_moves:
-        print(f"Illegal move: ({start_row}, {start_col}) -> ({end_row}, {end_col})")
-        return  # Do nothing if illegal
+    if candidate in board_obj.legal_moves:
+        board_obj.push(candidate)
+    else:
+        print(f"Illegal move from {start_sq} to {end_sq} (row,col)=({start_row},{start_col})->({end_row},{end_col})")
 
-    # If legal, proceed:
-    piece_data = game_state.get_piece_at(start_row, start_col)
-    if not piece_data:
-        return  # No piece to move (shouldn't happen if it was legal, but just in case)
-
-    color, piece_type = piece_data
-
-    # Handle captures
-    captured_piece_data = game_state.get_piece_at(end_row, end_col)
-    is_capture = (captured_piece_data is not None)
-    if is_capture:
-        captured_color, captured_piece_type = captured_piece_data
-        game_state.pieces[captured_color][captured_piece_type] = Bitboard.clear_bit(
-            game_state.pieces[captured_color][captured_piece_type], square_end
-        )
-        game_state.combined_color[captured_color] = Bitboard.clear_bit(game_state.combined_color[captured_color], square_end)
-        game_state.combined_all = Bitboard.clear_bit(game_state.combined_all, square_end)
-
-    # Remove the piece from the start square
-    game_state.pieces[color][piece_type] = Bitboard.clear_bit(game_state.pieces[color][piece_type], square_start)
-    # Place the piece on the end square
-    game_state.pieces[color][piece_type] = Bitboard.set_bit(game_state.pieces[color][piece_type], square_end)
-
-    # Update bitboards + UI
-    game_state.update_bitboards()
-    game_state.update_board_ui()
-
-    # Switch turn
-    game_state.current_turn = ~game_state.current_turn
-
-    # Log move
-    game_state.move_log.append(((start_row, start_col), (end_row, end_col), piece_type, is_capture))
-
-# **Draw Highlights**
-def draw_highlights(screen, game_state, selected_square, flipped=False):
+def draw_highlights(screen, board_obj, selected_square, flipped=False):
     """
     Highlight the selected square in translucent yellow,
-    then show all legal moves for that piece as:
+    then show all possible moves for that piece as:
       - small black circle for normal moves
-      - red ring for captures
+      - black ring for captures
     """
     if selected_square is None:
-        return  # No selection => no highlights
+        return  # No piece is currently selected
 
-    # 1) Highlight the selected square
-    sel_row, sel_col = selected_square
-    sq_size = 680 // 8
+    row, col = selected_square
+    sq_size = 680 // 8  # Adjust if needed
 
     # Convert for flipping
-    disp_row = 7 - sel_row if flipped else sel_row
-    disp_col = 7 - sel_col if flipped else sel_col
+    disp_row = 7 - row if flipped else row
+    disp_col = 7 - col if flipped else col
 
-    # Highlight selected in translucent yellow
+    # 1) Highlight the selected square in translucent yellow
     highlight_surf = p.Surface((sq_size, sq_size), p.SRCALPHA)
-    highlight_surf.fill((255, 255, 0, 100))
+    highlight_surf.fill((255, 255, 0, 100))  # RGBA => yellow with some transparency
     screen.blit(highlight_surf, (disp_col * sq_size, disp_row * sq_size))
 
-    # 2) Gather all moves for the selected piece
-    from_index = game_state.get_square(sel_row, sel_col)
-    all_legal = list(movegen.generate_legal_moves(game_state))
+    # 2) Gather all moves for the piece on that square
+    # In python-chess, row=0 => rank 8 => squares [0..7], row=7 => rank 1 => squares [56..63]
+    start_sq = row * 8 + col
 
-    # Filter moves that start at 'from_index'
-    legal_for_selected = [m for m in all_legal if m[0] == from_index]
+    # Filter legal moves in board_obj for those that start at start_sq
+    valid_dest_squares = []
+    for mv in board_obj.legal_moves:
+        if mv.from_square == start_sq:
+            valid_dest_squares.append(mv.to_square)
 
-    # 3) For each move, draw a small circle or ring
-    for (start, end, _) in legal_for_selected:
-        end_row = end // 8
-        end_col = end % 8
+    # 3) Draw a small black circle for normal moves, or a black ring for captures
+    for dest_sq in valid_dest_squares:
+        end_row = dest_sq // 8
+        end_col = dest_sq % 8
 
-        # Flip
         drow = 7 - end_row if flipped else end_row
         dcol = 7 - end_col if flipped else end_col
 
-        # Check if there's a piece of opposite color at destination => capture
-        piece_at_dest = game_state.get_piece_at(end_row, end_col)
-        is_capture = (piece_at_dest is not None and piece_at_dest[0] != game_state.current_turn)
+        # Check if this move is a capture
+        move_candidate = chess.Move(start_sq, dest_sq)
+        is_capture = board_obj.is_capture(move_candidate)
 
         if is_capture:
-            # capture ring
+            # Draw a black ring
             ring_surface = p.Surface((sq_size, sq_size), p.SRCALPHA)
             center = (sq_size // 2, sq_size // 2)
             radius = sq_size // 2
             line_width = 7
+            # RGBA => black ring with some transparency
             p.draw.circle(ring_surface, (0, 0, 0, 120), center, radius, line_width)
             screen.blit(ring_surface, (dcol * sq_size, drow * sq_size))
         else:
-            # Small black circle
+            # Draw a small black circle
             circle_surface = p.Surface((sq_size, sq_size), p.SRCALPHA)
             center = (sq_size // 2, sq_size // 2)
             radius = sq_size // 7
+            # black circle with transparency
             p.draw.circle(circle_surface, (0, 0, 0, 120), center, radius)
             screen.blit(circle_surface, (dcol * sq_size, drow * sq_size))
