@@ -18,7 +18,7 @@ def main():
     load_images()  # Load piece images
 
     running = True
-    flipped = True  # White at bottom
+    flipped = False  # White at bottom
     selected_square = None  # None if no piece is selected
 
     while running:

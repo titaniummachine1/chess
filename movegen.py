@@ -1,21 +1,14 @@
-##movegen.py keep this comment its improtant
-import itertools
+# movegen.py
+
 from bitboard import Bitboard as bitboard
 from GameState.constants import Color, Piece
 import tables  # Lookup tables for piece movement
 
 # ------------------------------------------------------------------
-# 1) A helper function to "slide" along a single direction
-#    until we hit the edge or a blocking piece.
+# 1) Slide in direction
 # ------------------------------------------------------------------
 def slide_in_direction(start_square, row_inc, col_inc, board):
-    """
-    Return a bitboard of all squares reachable from `start_square`
-    by moving (row_inc, col_inc) step by step, stopping if blocked.
-    """
     moves_bb = 0
-
-    # Occupancy info
     my_occ_bits = board.combined_color[board.current_turn]
     all_occ_bits = board.combined_all
 
@@ -25,120 +18,133 @@ def slide_in_direction(start_square, row_inc, col_inc, board):
     while True:
         row += row_inc
         col += col_inc
-        # Off board check
-        if row < 0 or row > 7 or col < 0 or col > 7:
+        if not (0 <= row < 8 and 0 <= col < 8):
             break
-
         sq = row * 8 + col
 
-        # If there is any piece on 'sq'
         if (all_occ_bits >> sq) & 1:
-            # It's blocked here. If it's the opponent's piece, we can capture.
+            # Occupied
             if not ((my_occ_bits >> sq) & 1):
-                moves_bb |= (1 << sq)
+                moves_bb |= (1 << sq)  # can capture the opponent
             break
         else:
-            # Empty square => we can move there and keep going
             moves_bb |= (1 << sq)
-
     return moves_bb
 
 # ------------------------------------------------------------------
-# 2) Replace the bishop/rook/queen "mask" approach with proper ray scans
+# 2) Sliding pieces
 # ------------------------------------------------------------------
-
 def get_bishop_moves_bb(square, board):
-    """Generate bishop moves by scanning 4 diagonal directions."""
-    directions = [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+    directions = [(1,1), (1,-1), (-1,1), (-1,-1)]
     moves = 0
-    for (dr, dc) in directions:
+    for dr, dc in directions:
         moves |= slide_in_direction(square, dr, dc, board)
-    # Exclude squares occupied by my own color
     return moves & ~board.combined_color[board.current_turn]
 
 def get_rook_moves_bb(square, board):
-    """Generate rook moves by scanning 4 orthogonal directions."""
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    directions = [(1,0), (-1,0), (0,1), (0,-1)]
     moves = 0
-    for (dr, dc) in directions:
+    for dr, dc in directions:
         moves |= slide_in_direction(square, dr, dc, board)
     return moves & ~board.combined_color[board.current_turn]
 
 def get_queen_moves_bb(square, board):
-    """
-    Generate queen moves by combining rook + bishop directions
-    (8 directions total).
-    """
-    directions = [
-        (1, 0), (-1, 0), (0, 1), (0, -1),    # rook-like
-        (1, 1), (1, -1), (-1, 1), (-1, -1)   # bishop-like
-    ]
+    directions = [(1,0), (-1,0), (0,1), (0,-1),
+                  (1,1), (1,-1), (-1,1), (-1,-1)]
     moves = 0
-    for (dr, dc) in directions:
+    for dr, dc in directions:
         moves |= slide_in_direction(square, dr, dc, board)
     return moves & ~board.combined_color[board.current_turn]
 
 # ------------------------------------------------------------------
-# 3) Keep the Pawn, Knight, King code from "tables"
+# 3) Knight, King, Pawn base moves
 # ------------------------------------------------------------------
-
-def get_king_moves_bb(square, board):
-    """Generates king moves using precomputed lookup tables."""
-    return tables.KING_MOVES[square] & ~board.combined_color[board.current_turn]
-
 def get_knight_moves_bb(square, board):
-    """Generates knight moves using precomputed lookup tables."""
     return tables.KNIGHT_MOVES[square] & ~board.combined_color[board.current_turn]
 
+def get_king_moves_bb(square, board):
+    """
+    Generates king moves using precomputed lookup, plus
+    potential castling squares if castling rights are still present.
+    """
+    color = board.current_turn
+    moves = tables.KING_MOVES[square] & ~board.combined_color[color]
+
+    # -- CASTLING LOGIC (simple version) --
+    # We'll check if the king is on its starting square, if there's space,
+    # and if the relevant castling_right is True. We do NOT check check/attacks.
+    # That is left to 'generate_legal_moves' + 'leaves_in_check'.
+
+    # White
+    if color == Color.WHITE and square == 4:  # e1
+        # kingside: check squares f1,g1 => 5,6
+        if board.castling_rights['K']:
+            if not bitboard.get_bit(board.combined_all, 5) and \
+               not bitboard.get_bit(board.combined_all, 6):
+                # add g1 (6) to moves
+                moves |= (1 << 6)
+        # queenside: check squares d1,c1,b1 => 3,2,1
+        if board.castling_rights['Q']:
+            if not bitboard.get_bit(board.combined_all, 3) and \
+               not bitboard.get_bit(board.combined_all, 2) and \
+               not bitboard.get_bit(board.combined_all, 1):
+                # add c1 (2) to moves
+                moves |= (1 << 2)
+
+    # Black
+    if color == Color.BLACK and square == 60: # e8
+        # kingside: check squares f8,g8 => 61,62
+        if board.castling_rights['k']:
+            if not bitboard.get_bit(board.combined_all, 61) and \
+               not bitboard.get_bit(board.combined_all, 62):
+                moves |= (1 << 62)
+        # queenside: check squares d8,c8,b8 => 59,58,57
+        if board.castling_rights['q']:
+            if not bitboard.get_bit(board.combined_all, 59) and \
+               not bitboard.get_bit(board.combined_all, 58) and \
+               not bitboard.get_bit(board.combined_all, 57):
+                moves |= (1 << 58)
+
+    return moves
+
+
 def get_pawn_moves_bb(square, board):
-    """Generates pawn moves including attacks, quiet pushes, double pushes, en passant captures."""
     color = board.current_turn
 
-    # 1) Normal Attacks (from precomputed table), but only squares occupied by opponent
     attacks = tables.PAWN_ATTACKS[color][square]
-    attacks &= board.combined_color[~color]  # Only valid if an opponent occupies it
+    attacks &= board.combined_color[~color]  # only if opponent occupies it
 
-    # 2) Single Push
     quiets = 0
     if color == Color.WHITE:
         forward1 = square + 8
         if forward1 < 64 and not bitboard.get_bit(board.combined_all, forward1):
             quiets |= bitboard.set_bit(0, forward1)
-
-            # 3) Double Push (from rank 1 -> rank 3)
-            # square's row = square//8. If row == 1 => do double
             if (square // 8) == 1:
                 forward2 = square + 16
                 if forward2 < 64 and not bitboard.get_bit(board.combined_all, forward2):
                     quiets |= bitboard.set_bit(0, forward2)
-
     else:
         forward1 = square - 8
         if forward1 >= 0 and not bitboard.get_bit(board.combined_all, forward1):
             quiets |= bitboard.set_bit(0, forward1)
-
-            # Double Push (from rank 6 -> rank 4)
             if (square // 8) == 6:
                 forward2 = square - 16
                 if forward2 >= 0 and not bitboard.get_bit(board.combined_all, forward2):
                     quiets |= bitboard.set_bit(0, forward2)
 
-    # 4) En Passant captures
-    # If board.en_passant_sq != -1, check if that square is diagonally adjacent
     enp_captures = 0
     ep_sq = board.en_passant_sq
     if ep_sq != -1:
-        # White pawns: can capture ep_sq if it is exactly (square+7) or (square+9) 
-        # but also must match the file constraints
+        # White
         if color == Color.WHITE:
-            # left diagonal
+            # left diag
             if (square + 7) == ep_sq and (square % 8) != 0:
                 enp_captures |= bitboard.set_bit(0, ep_sq)
-            # right diagonal
+            # right diag
             if (square + 9) == ep_sq and (square % 8) != 7:
                 enp_captures |= bitboard.set_bit(0, ep_sq)
         else:
-            # Black pawns
+            # Black
             if (square - 7) == ep_sq and (square % 8) != 7:
                 enp_captures |= bitboard.set_bit(0, ep_sq)
             if (square - 9) == ep_sq and (square % 8) != 0:
@@ -150,9 +156,7 @@ def get_pawn_moves_bb(square, board):
 # ------------------------------------------------------------------
 # 4) Summon piece-specific generation, then yield moves
 # ------------------------------------------------------------------
-
 def generate_piece_moves(square, piece, board):
-    """Generates all pseudo-legal moves for a given piece using bitboards."""
     if piece == Piece.PAWN:
         return get_pawn_moves_bb(square, board)
     elif piece == Piece.KNIGHT:
@@ -168,46 +172,65 @@ def generate_piece_moves(square, piece, board):
     else:
         raise RuntimeError(f"Invalid piece: {piece}")
 
+
 def generate_moves(board):
     """Generates all pseudo-legal moves for the current player."""
-    for piece in Piece:
-        piece_bb = board.get_piece_bb(piece, board.current_turn)
+    from GameState.constants import Piece  # or import globally
+    for p in Piece:
+        piece_bb = board.get_piece_bb(p, board.current_turn)
         while piece_bb:
-            src = bitboard.lsb(piece_bb)          # least significant bit
+            src = bitboard.lsb(piece_bb)
             piece_bb = bitboard.clear_bit(piece_bb, src)
 
-            moves = generate_piece_moves(src, piece, board)
-            while moves:
-                dest = bitboard.lsb(moves)
-                yield (src, dest, None)           # (startSquare, endSquare, promotionInfo)
-                moves = bitboard.clear_bit(moves, dest)
+            moves_bb = generate_piece_moves(src, p, board)
+            while moves_bb:
+                dest = bitboard.lsb(moves_bb)
+                moves_bb = bitboard.clear_bit(moves_bb, dest)
+                yield (src, dest, None)  # no promotion piece info here by default
 
-def generate_legal_moves(board):
-    """Filters out moves that leave our king in check."""
-    return filter(lambda m: not leaves_in_check(board, m), generate_moves(board))
 
-def leaves_in_check(board, move):
-    """Check if applying `move` leaves our king in check."""
-    new_board = board.apply_move(move)
-    new_board.current_turn = ~new_board.current_turn  # Switch perspective
+# Simple check if a color's king is attacked
+def is_king_in_check(board, color):
+    from GameState.constants import Piece
+    king_bb = board.pieces[color][Piece.KING]
+    if king_bb == 0:
+        return True  # should never happen, but be safe
 
-    # Find my king's position
-    my_king_sq = bitboard.lsb(new_board.get_piece_bb(Piece.KING, new_board.current_turn))
-    opp_color = ~new_board.current_turn
+    king_sq = bitboard.lsb(king_bb)
+    opp_color = ~color
 
-    # Check various attacks
-    if tables.PAWN_ATTACKS[new_board.current_turn][my_king_sq] & new_board.get_piece_bb(Piece.PAWN, opp_color):
+    # Pawn
+    if tables.PAWN_ATTACKS[color][king_sq] & board.pieces[opp_color][Piece.PAWN]:
         return True
-    if tables.KNIGHT_MOVES[my_king_sq] & new_board.get_piece_bb(Piece.KNIGHT, opp_color):
+    # Knight
+    if tables.KNIGHT_MOVES[king_sq] & board.pieces[opp_color][Piece.KNIGHT]:
         return True
-    if tables.KING_MOVES[my_king_sq] & new_board.get_piece_bb(Piece.KING, opp_color):
+    # King
+    if tables.KING_MOVES[king_sq] & board.pieces[opp_color][Piece.KING]:
         return True
-    # For bishop/rook attacks, use the same newBoard sliding logic:
-    if get_bishop_moves_bb(my_king_sq, new_board) & (new_board.get_piece_bb(Piece.BISHOP, opp_color) |
-                                                     new_board.get_piece_bb(Piece.QUEEN, opp_color)):
+    # Bishop or Queen
+    if get_bishop_moves_bb(king_sq, board) & (board.pieces[opp_color][Piece.BISHOP] | board.pieces[opp_color][Piece.QUEEN]):
         return True
-    if get_rook_moves_bb(my_king_sq, new_board) & (new_board.get_piece_bb(Piece.ROOK, opp_color) |
-                                                   new_board.get_piece_bb(Piece.QUEEN, opp_color)):
+    # Rook or Queen
+    if get_rook_moves_bb(king_sq, board) & (board.pieces[opp_color][Piece.ROOK] | board.pieces[opp_color][Piece.QUEEN]):
         return True
 
     return False
+
+def leaves_in_check(board, move):
+    """Test the move in-place: make_move, check, then undo_move."""
+    (start_sq, end_sq, promo) = move
+    color_moving = board.current_turn
+
+    success = board.make_move(start_sq, end_sq, promo)
+    if not success:
+        # If we fail to make the move (e.g. no piece on start), treat it as if it's illegal
+        return True
+
+    check_status = is_king_in_check(board, color_moving)
+    board.undo_move()
+    return check_status
+
+
+def generate_legal_moves(board):
+    return filter(lambda mv: not leaves_in_check(board, mv), generate_moves(board))
