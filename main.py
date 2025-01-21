@@ -7,7 +7,7 @@ import pygame as p
 WIDTH, HEIGHT = 680, 680
 DIMENSION = 8  # Chessboard size (8x8)
 SQ_SIZE = HEIGHT // DIMENSION
-FPS = 24
+FPS = 12
 
 def main():
     """Main game loop for the chess program."""
@@ -40,6 +40,7 @@ def main():
                     # Only select if there's a piece of our color
                     if piece_data is not None:
                         color, piece_type = piece_data
+                        print(color, piece_type)
                         if color == game_state.current_turn:
                             selected_square = (row, col)
                 else:
