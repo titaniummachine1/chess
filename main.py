@@ -2,8 +2,8 @@ import pygame as p
 import chess
 import random
 from utils import load_images, draw_board, draw_pieces, apply_legal_move, draw_highlights
-from movegen import DrawbackBoard
-from drawback_manager import check_drawback_loss
+from GameState.movegen import DrawbackBoard
+from GameState.drawback_manager import check_drawback_loss
 
 # Game Settings
 WIDTH, HEIGHT = 680, 680
