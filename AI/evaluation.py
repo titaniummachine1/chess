@@ -5,7 +5,7 @@ from Chess.GameState.gamestate import ChessBoard
 from Chess.GameState.constants import Piece
 import tables
 import Chess.bitboard as bitboard
-import movegen
+import GameState.movegen as movegen
 
 class Score(Enum):
     PAWN = np.int32(100)

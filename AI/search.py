@@ -1,6 +1,6 @@
 import numpy as np
 
-import movegen
+import GameState.movegen as movegen
 import Chess.AI.evaluation as evaluation
 
 def negamax(board, depth):

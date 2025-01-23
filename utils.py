@@ -1,7 +1,7 @@
 import pygame as p
 import os
 import chess
-from movegen import DrawbackBoard  # Import the custom board
+from GameState.movegen import DrawbackBoard  # Import the custom board
 
 IMAGES = {}
 SQ_SIZE = 680 // 8  # Chessboard square size
