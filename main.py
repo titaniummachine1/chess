@@ -24,9 +24,6 @@ def assign_random_drawbacks(board):
     board.set_drawback(chess.WHITE, white_drawback)
     board.set_drawback(chess.BLACK, None)  # Opponent's drawback is unknown
 
-    print(f"White's drawback: {white_drawback if white_drawback else 'None'}")
-    print("Black's drawback: UNKNOWN")
-
 # Display winner message and wait for restart
 def display_winner(screen, winner_color):
     font = p.font.Font(None, 50)
@@ -75,10 +72,6 @@ def main():
                     move_coords = (selected_square, (row, col))
                     new_selected_square = apply_legal_move(board, move_coords, selected_square)
                     selected_square = new_selected_square  # Update selection based on logic
-
-                    # Print updated drawbacks after every move
-                    print(f"White's drawback: {board.drawbacks[chess.WHITE]}")
-                    print("Black's drawback: UNKNOWN")  # Still hidden
 
                     # Ensure the board updates before checking for game end
                     draw_board(screen, DIMENSION, WIDTH, HEIGHT)

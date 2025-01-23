@@ -26,12 +26,20 @@ class DrawbackBoard(chess.Board):
         return self.drawbacks.get(color, None)
 
     def is_variant_end(self):
-        """Checks if the game is over (king captured or drawback loss condition)."""
-        # Game ends if a king is captured
-        if not (self.kings & self.occupied_co[chess.WHITE]):
-            return True
-        if not (self.kings & self.occupied_co[chess.BLACK]):
-            return True
+        """
+        Checks if the game is over:
+        - A player loses immediately if their king is missing at the start of their turn.
+        - Drawback loss conditions are also checked.
+        """
+        white_king_alive = bool(self.kings & self.occupied_co[chess.WHITE])
+        black_king_alive = bool(self.kings & self.occupied_co[chess.BLACK])
+
+        # If it's White's turn but White has no king, White loses (Black wins)
+        if self.turn == chess.WHITE and not white_king_alive:
+            return True  # White lost
+        # If it's Black's turn but Black has no king, Black loses (White wins)
+        if self.turn == chess.BLACK and not black_king_alive:
+            return True  # Black lost
 
         # Check if the current player's drawback causes an instant loss
         active_drawback = self.get_active_drawback(self.turn)
@@ -45,15 +53,24 @@ class DrawbackBoard(chess.Board):
         return False
 
     def is_variant_win(self):
-        """A player wins if they capture the opponent's king."""
-        if self.is_variant_end():
-            return not bool(self.kings & self.occupied_co[not self.turn])  # Opponent must have a king
-        return False
+        """
+        Determines if the current player wins:
+        - The game is over, and the opponent's king is missing at the end of the previous move.
+        """
+        white_king_alive = bool(self.kings & self.occupied_co[chess.WHITE])
+        black_king_alive = bool(self.kings & self.occupied_co[chess.BLACK])
 
+        # If it's White's turn but Black's king is missing, White wins
+        if self.turn == chess.WHITE and not black_king_alive:
+            return True
+        # If it's Black's turn but White's king is missing, Black wins
+        if self.turn == chess.BLACK and not white_king_alive:
+            return True
 
+        return False  # No winner yet
 
     def is_variant_loss(self):
-        """A player loses if their king is missing or a drawback loss condition is met."""
+        """A player loses if their king is missing at the start of their turn."""
         return self.is_variant_end() and not self.is_variant_win()
 
     def generate_legal_moves(self, from_mask=chess.BB_ALL, to_mask=chess.BB_ALL):
