@@ -111,7 +111,8 @@ def draw_highlights(screen, board_obj, selected_square, flipped=False):
     screen.blit(highlight_surf, (disp_col * sq_size, disp_row * sq_size))
 
     start_sq = row * 8 + col
-    valid_dest_squares = [mv.to_square for mv in board_obj.legal_moves if mv.from_square == start_sq]
+    valid_dest_squares = [mv.to_square for mv in board_obj.generate_pseudo_legal_moves() if mv.from_square == start_sq]
+
 
     for dest_sq in valid_dest_squares:
         end_row = dest_sq // 8

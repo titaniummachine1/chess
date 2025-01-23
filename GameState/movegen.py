@@ -45,10 +45,12 @@ class DrawbackBoard(chess.Board):
         return False
 
     def is_variant_win(self):
-        """A player wins if their opponent is in a losing position."""
+        """A player wins if they capture the opponent's king."""
         if self.is_variant_end():
-            return not bool(self.occupied_co[self.turn])  # If you have no pieces left, you lose
+            return not bool(self.kings & self.occupied_co[not self.turn])  # Opponent must have a king
         return False
+
+
 
     def is_variant_loss(self):
         """A player loses if their king is missing or a drawback loss condition is met."""

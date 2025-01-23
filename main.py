@@ -27,15 +27,14 @@ def assign_random_drawbacks(board):
     print(f"White's drawback: {white_drawback if white_drawback else 'None'}")
     print("Black's drawback: UNKNOWN")
 
-# Display winner message
+# Display winner message and wait for restart
 def display_winner(screen, winner_color):
     font = p.font.Font(None, 50)
-    text = f"{'White' if winner_color == chess.WHITE else 'Black'} wins!"
+    text = f"{'White' if winner_color == chess.WHITE else 'Black'} wins! Press 'R' to restart."
     text_surf = font.render(text, True, p.Color("black"), p.Color("gold"))
     text_rect = text_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2))
     screen.blit(text_surf, text_rect)
     p.display.flip()
-    p.time.delay(3000)
 
 # Main game loop
 def main():
@@ -52,16 +51,15 @@ def main():
     running = True
     flipped = True
     selected_square = None
+    game_over = False  # Track if the game is over
+    winner_color = None  # Store winner color to display properly
 
     while running:
         for event in p.event.get():
             if event.type == p.QUIT:
                 running = False
 
-            elif event.type == p.MOUSEBUTTONDOWN:
-                if board.is_variant_end():
-                    continue  # Stop input if game has ended
-
+            elif event.type == p.MOUSEBUTTONDOWN and not game_over:
                 x, y = event.pos
                 row, col = y // SQ_SIZE, x // SQ_SIZE
                 if flipped:
@@ -73,21 +71,24 @@ def main():
                     if board.piece_at(clicked_square) and board.color_at(clicked_square) == board.turn:
                         selected_square = (row, col)
                 else:
-                    # Attempting a move
+                    # Handle clicks intelligently
                     move_coords = (selected_square, (row, col))
                     new_selected_square = apply_legal_move(board, move_coords, selected_square)
-                    selected_square = new_selected_square  # Update selection based on the new logic
-
+                    selected_square = new_selected_square  # Update selection based on logic
 
                     # Print updated drawbacks after every move
                     print(f"White's drawback: {board.drawbacks[chess.WHITE]}")
                     print("Black's drawback: UNKNOWN")  # Still hidden
 
+                    # Ensure the board updates before checking for game end
+                    draw_board(screen, DIMENSION, WIDTH, HEIGHT)
+                    draw_pieces(screen, board, flipped, DIMENSION)
+                    p.display.flip()
+
                     # Check for game end
                     if board.is_variant_end():
-                        winner = chess.WHITE if board.is_variant_win() else chess.BLACK
-                        display_winner(screen, winner)
-                        running = False
+                        winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
+                        game_over = True
 
             elif event.type == p.KEYDOWN:
                 if event.key == p.K_f:
@@ -96,11 +97,18 @@ def main():
                     board.reset()
                     assign_random_drawbacks(board)
                     selected_square = None
+                    game_over = False  # Reset game state
+                    winner_color = None  # Reset winner message
 
         # Drawing board and pieces
         draw_board(screen, DIMENSION, WIDTH, HEIGHT)
-        draw_highlights(screen, board, selected_square, flipped)
+        if selected_square is not None:
+            draw_highlights(screen, board, selected_square, flipped)
         draw_pieces(screen, board, flipped, DIMENSION)
+
+        # Display winner screen without disappearing instantly
+        if game_over and winner_color is not None:
+            display_winner(screen, winner_color)
 
         clock.tick(FPS)
         p.display.flip()
