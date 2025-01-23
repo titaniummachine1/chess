@@ -26,21 +26,19 @@ class DrawbackBoard(chess.Board):
         """Returns the current drawback for the given color."""
         return self.drawbacks.get(color, None)
 
+    @property
+    def legal_moves(self):
+        return self.generate_legal_moves()
+
+
     def is_variant_end(self):
-        """
-        The game ends if:
-          - One side's king is gone (the other side wins),
-          - or a drawback triggers an immediate loss.
-        """
-        # 1) Check if either king is missing
+        """Checks if the game ends: missing king or a drawback triggers loss."""
         white_king_alive = bool(self.kings & self.occupied_co[chess.WHITE])
         black_king_alive = bool(self.kings & self.occupied_co[chess.BLACK])
-
+        # If a king is missing => game ends
         if not white_king_alive or not black_king_alive:
-            # The game ends immediately if one king is gone
             return True
-
-        # 2) Check if the current player's drawback triggers a loss
+        # Check if the current player's drawback triggers an auto-loss
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
             drawback_info = get_drawback_info(active_drawback)
@@ -48,81 +46,71 @@ class DrawbackBoard(chess.Board):
                 if drawback_info["loss_condition"](self, self.turn):
                     print(f"Drawback '{active_drawback}' caused a loss!")
                     return True
-
         return False
 
     def is_variant_win(self):
         """
-        A player wins if the *opponent’s* king is missing.
-        That is:
-          - If black king is missing => White wins,
-          - If white king is missing => Black wins.
+        A player wins if the opponent's king is missing:
+        - If black's king is gone => White wins,
+        - If white's king is gone => Black wins.
         """
         white_king_alive = bool(self.kings & self.occupied_co[chess.WHITE])
         black_king_alive = bool(self.kings & self.occupied_co[chess.BLACK])
-
         if not black_king_alive:
-            # Opponent's (Black) king is missing => White is the winner
-            return True
+            return True   # White is the winner
         if not white_king_alive:
-            # Opponent's (White) king is missing => Black is the winner
-            return False  # White's missing => for White's perspective, that's a loss
-
-        # Otherwise, no winner yet
+            return False  # Black is the winner
         return False
 
     def is_variant_loss(self):
         """
-        The current player loses if their own king is missing
-        or if a drawback triggers a loss (handled by is_variant_end()) 
-        but they are *not* the winner.
+        The current player loses if they've no king or a drawback triggers loss,
+        but they aren't the winner.
         """
         return self.is_variant_end() and not self.is_variant_win()
 
     def generate_legal_moves(self, from_mask=chess.BB_ALL, to_mask=chess.BB_ALL):
         """
-        Generates legal moves ignoring check. Also filters out moves by the current drawback.
+        1) If game is lost, yield no moves.
+        2) Generate pseudo-legal moves (ignoring check).
+        3) Filter them by the active drawback's "illegal_moves" if any.
         """
-        # If the game is already over, yield no moves
-        if self.is_variant_end():
+        if self.is_variant_loss():
             return iter([])
 
-        # 1) Generate all standard moves ignoring check (pseudo_legal or normal legal):
-        #    - Since we want to allow moving into check, let's use pseudo-legal:
-        legal_moves = list(super().generate_pseudo_legal_moves(from_mask, to_mask))
+        moves = list(super().generate_pseudo_legal_moves(from_mask, to_mask))
 
-        # 2) Filter out moves restricted by the current player's drawback
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
             drawback_info = get_drawback_info(active_drawback)
             if drawback_info and "illegal_moves" in drawback_info:
-                # Keep only the moves that are not declared illegal
-                legal_moves = [m for m in legal_moves if not drawback_info["illegal_moves"](self, self.turn, m)]
+                filtered = []
+                for m in moves:
+                    if not drawback_info["illegal_moves"](self, self.turn, m):
+                        filtered.append(m)
+                    else:
+                        print(f"Blocked by '{active_drawback}': {m}")
+                moves = filtered
 
-        return iter(legal_moves)
+        return iter(moves)
 
     def is_legal(self, move):
         """
-        Determines if a move is legal:
-          - Allows capturing the king,
-          - Ignores check rules,
-          - Respects any drawback-based restrictions.
+        If a move is in generate_pseudo_legal_moves() and not blocked by
+        the active drawback, it's legal. King captures are always legal.
         """
-        # Must be a valid (pseudo-legal) chess move
+        # Must be pseudo-legal
         if move not in super().generate_pseudo_legal_moves():
             return False
-
-        # If the move captures a king, it's allowed
-        if self.piece_at(move.to_square) and self.piece_at(move.to_square).piece_type == chess.KING:
+        # King capture is always allowed
+        captured_piece = self.piece_at(move.to_square)
+        if captured_piece and captured_piece.piece_type == chess.KING:
             return True
-
-        # Otherwise, respect the active drawback
+        # Check active drawback
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
             drawback_info = get_drawback_info(active_drawback)
             if drawback_info and "illegal_moves" in drawback_info:
-                # If the drawback says it's illegal, then it's not legal
                 if drawback_info["illegal_moves"](self, self.turn, move):
                     return False
-
         return True

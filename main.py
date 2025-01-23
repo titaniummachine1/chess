@@ -3,7 +3,7 @@ import chess
 import random
 from utils import load_images, draw_board, draw_pieces, apply_legal_move, draw_highlights
 from GameState.movegen import DrawbackBoard
-from GameState.drawback_manager import get_drawback_info
+from GameState.drawback_manager import DRAWBACKS
 
 # Game Settings
 WIDTH, HEIGHT = 680, 680
@@ -11,18 +11,17 @@ DIMENSION = 8
 SQ_SIZE = HEIGHT // DIMENSION
 FPS = 15
 
-# Assign random drawbacks and handle missing drawbacks
 def assign_random_drawbacks(board):
-    available_drawbacks = list(get_drawback_info("").keys())
+    available_drawbacks = list(DRAWBACKS.keys())
 
-    if not available_drawbacks:  # If no drawbacks exist, handle it safely
-        print("Warning: No drawbacks found. Assigning None.")
-        white_drawback = None
-    else:
-        white_drawback = random.choice(available_drawbacks)
+    drawback = random.choice(available_drawbacks)
 
-    board.set_drawback(chess.WHITE, white_drawback)
-    board.set_drawback(chess.BLACK, None)  # Opponent's drawback is unknown
+    board.set_drawback(chess.WHITE, drawback)
+    board.set_drawback(chess.BLACK, drawback)  # Opponent's drawback is unknown
+
+    # Debug print
+    print(f"Assigned drawback - White: {drawback}, Black: UNKNOWN")
+
 
 # Display winner message and wait for restart
 def display_winner(screen, winner_color):
