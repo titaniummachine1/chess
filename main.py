@@ -11,11 +11,21 @@ DIMENSION = 8
 SQ_SIZE = HEIGHT // DIMENSION
 FPS = 15
 
-# Assign random drawbacks
+# Assign random drawbacks and handle missing drawbacks
 def assign_random_drawbacks(board):
     available_drawbacks = list(get_drawback_info("").keys())
-    board.set_drawback(chess.WHITE, random.choice(available_drawbacks))
+
+    if not available_drawbacks:  # If no drawbacks exist, handle it safely
+        print("Warning: No drawbacks found. Assigning None.")
+        white_drawback = None
+    else:
+        white_drawback = random.choice(available_drawbacks)
+
+    board.set_drawback(chess.WHITE, white_drawback)
     board.set_drawback(chess.BLACK, None)  # Opponent's drawback is unknown
+
+    print(f"White's drawback: {white_drawback if white_drawback else 'None'}")
+    print("Black's drawback: UNKNOWN")
 
 # Display winner message
 def display_winner(screen, winner_color):
@@ -37,6 +47,7 @@ def main():
     load_images()
     board = DrawbackBoard()
     assign_random_drawbacks(board)
+    board.reset()
 
     running = True
     flipped = True
@@ -64,8 +75,13 @@ def main():
                 else:
                     # Attempting a move
                     move_coords = (selected_square, (row, col))
-                    apply_legal_move(board, move_coords)
-                    selected_square = None
+                    new_selected_square = apply_legal_move(board, move_coords, selected_square)
+                    selected_square = new_selected_square  # Update selection based on the new logic
+
+
+                    # Print updated drawbacks after every move
+                    print(f"White's drawback: {board.drawbacks[chess.WHITE]}")
+                    print("Black's drawback: UNKNOWN")  # Still hidden
 
                     # Check for game end
                     if board.is_variant_end():

@@ -14,8 +14,16 @@ def load_images():
     pieces = ['wP', 'wR', 'wN', 'wB', 'wQ', 'wK', 'bP', 'bR', 'bN', 'bB', 'bQ', 'bK']
     for piece_key in pieces:
         img_path = os.path.join('images', f'{piece_key}.png')
+        
+        # Debug: Check if image path exists
+        if not os.path.exists(img_path):
+            print(f"Warning: Missing image {img_path}")  # Debugging message
+            continue  # Skip missing images
+
         image_surf = p.image.load(img_path)
         IMAGES[piece_key] = p.transform.smoothscale(image_surf, (SQ_SIZE, SQ_SIZE))
+
+    print(f"Loaded images: {list(IMAGES.keys())}")  # Debugging message
 
 def draw_board(screen, dimension=8, width=680, height=680):
     """Draw an 8x8 chessboard (alternating squares)."""
@@ -49,23 +57,41 @@ def draw_pieces(screen, board_obj, flipped=False, dimension=8):
             piece_type = piece.symbol().upper()
             image_key = color_char + piece_type
 
-            if image_key in IMAGES:
-                screen.blit(IMAGES[image_key], p.Rect(draw_col * sq_size, draw_row * sq_size, sq_size, sq_size))
+            # Debug: Check if the image key exists in IMAGES
+            if image_key not in IMAGES:
+                print(f"Warning: Missing image for {image_key}")  # Debugging message
+                continue  # Skip drawing if image is missing
 
-def apply_legal_move(board_obj, move):
+            screen.blit(IMAGES[image_key], p.Rect(draw_col * sq_size, draw_row * sq_size, sq_size, sq_size))
+
+def apply_legal_move(board_obj, move, selected_square):
     """
-    Push a move onto a DrawbackBoard if it's legal.
-    `move` is a tuple: ((start_row, start_col), (end_row, end_col))
+    Handles move execution and piece selection:
+    - If a move is legal, executes it.
+    - If clicking the same square, deselects.
+    - If clicking a new piece of the same color, switches selection.
     """
     (start_row, start_col), (end_row, end_col) = move
     start_sq = start_row * 8 + start_col
     end_sq = end_row * 8 + end_col
-    candidate = chess.Move(start_sq, end_sq)
 
+    # If clicking the same piece, deselect it
+    if (start_row, start_col) == (end_row, end_col):
+        return None  # Deselect
+
+    # If clicking another piece of the same color, switch selection
+    piece_at_dest = board_obj.piece_at(end_sq)
+    if piece_at_dest and board_obj.color_at(end_sq) == board_obj.turn:
+        return (end_row, end_col)  # Switch selection
+
+    # Otherwise, attempt to move the piece
+    candidate = chess.Move(start_sq, end_sq)
     if candidate in board_obj.legal_moves:
         board_obj.push(candidate)
+        return None  # Move completed, deselect piece
     else:
         print(f"Illegal move from {start_sq} to {end_sq}")
+        return selected_square  # Keep the previous selection if move was illegal
 
 def draw_highlights(screen, board_obj, selected_square, flipped=False):
     """

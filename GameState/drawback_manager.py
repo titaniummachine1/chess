@@ -1,40 +1,52 @@
 import importlib
 import os
+import sys
 
-DRAWBACKS = {}  # Stores all loaded drawbacks dynamically
-
+# Dictionary to store dynamically loaded drawbacks
+DRAWBACKS = {}
 
 def load_drawbacks():
     """
-    Loads all drawbacks dynamically from the 'drawbacks' directory.
-    Each drawback is a separate Python module defining its rules.
+    Dynamically loads all drawbacks from the 'drawbacks' directory.
+    Each drawback module defines specific game rule modifications.
     """
     drawbacks_dir = os.path.join(os.path.dirname(__file__), "drawbacks")
+
     if not os.path.exists(drawbacks_dir):
         print("Warning: Drawbacks directory not found!")
         return
 
+    # Ensure the drawbacks directory is a valid Python module path
+    if drawbacks_dir not in sys.path:
+        sys.path.append(drawbacks_dir)
+
+    # Load each Python file in the drawbacks directory (except __init__.py)
     for filename in os.listdir(drawbacks_dir):
         if filename.endswith(".py") and filename != "__init__.py":
             drawback_name = filename[:-3]  # Remove '.py' extension
+            module_path = f"GameState.drawbacks.{drawback_name}"
+
             try:
-                module = importlib.import_module(f"GameState.drawbacks.{drawback_name}")
-                if hasattr(module, "drawback_info"):
-                    DRAWBACKS[drawback_name] = module.drawback_info
+                module = importlib.import_module(module_path)
+                
+                if hasattr(module, "DRAWBACK_INFO"):
+                    DRAWBACKS[drawback_name] = module.DRAWBACK_INFO
+                    print(f"Loaded drawback: {drawback_name}")
                 else:
-                    print(f"Warning: Drawback '{drawback_name}' is missing 'drawback_info'.")
+                    print(f"Warning: Drawback '{drawback_name}' is missing 'DRAWBACK_INFO'.")
+
             except Exception as e:
                 print(f"Error loading drawback '{drawback_name}': {e}")
 
 
 def get_drawback_info(drawback_name):
     """
-    Retrieves drawback rules for a given drawback name.
+    Retrieves the drawback rules based on the given drawback name.
     :param drawback_name: Name of the drawback to fetch.
-    :return: Drawback rule dictionary or an empty dict if not found.
+    :return: Dictionary containing the drawback details or an empty dict if not found.
     """
     return DRAWBACKS.get(drawback_name, {})
 
 
-# Load drawbacks when the module is first imported
+# Automatically load drawbacks when the module is first imported
 load_drawbacks()
