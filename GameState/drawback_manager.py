@@ -1,5 +1,3 @@
-# GameState/drawback_manager.py
-
 import importlib
 import os
 import sys
@@ -24,15 +22,14 @@ def load_drawbacks():
     if parent_dir not in sys.path:
         sys.path.append(parent_dir)
 
-    # Load each Python file in the drawbacks directory (except __init__.py)
+    # Load each Python file in the 'drawbacks' directory (except __init__.py)
     for filename in os.listdir(drawbacks_dir):
         if filename.endswith(".py") and filename != "__init__.py":
-            drawback_name = filename[:-3]  # Remove '.py' extension
-            module_path = f"GameState.drawbacks.{drawback_name}"  # Fully qualified module path
+            drawback_name = filename[:-3]  # remove '.py'
+            module_path = f"GameState.drawbacks.{drawback_name}"
 
             try:
                 module = importlib.import_module(module_path)
-                
                 if hasattr(module, "DRAWBACK_INFO"):
                     DRAWBACKS[drawback_name] = module.DRAWBACK_INFO
                     print(f"Loaded drawback: {drawback_name}")
@@ -44,10 +41,8 @@ def load_drawbacks():
 def get_drawback_info(drawback_name):
     """
     Retrieves the drawback rules based on the given drawback name.
-    :param drawback_name: Name of the drawback to fetch.
-    :return: Dictionary containing the drawback details or an empty dict if not found.
     """
     return DRAWBACKS.get(drawback_name, {})
 
-# Automatically load drawbacks when the module is first imported
+# Automatically load drawbacks
 load_drawbacks()
