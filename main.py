@@ -17,24 +17,10 @@ WHITE_AI = False  # Set to True if you want White to be controlled by AI
 BLACK_AI = True   # Set to True if you want Black to be controlled by AI
 
 
-def assign_random_drawbacks(board):
-    """Assign random drawbacks to both players."""
-    available_drawbacks = list(DRAWBACKS.keys())
-
-    if not available_drawbacks:
-        print("Warning: No drawbacks available to assign.")
-        white_drawback = None
-        black_drawback = None
-    else:
-        white_drawback = random.choice(available_drawbacks)
-        black_drawback = random.choice(available_drawbacks)
-
-    board.set_drawback(chess.WHITE, white_drawback)
-    board.set_drawback(chess.BLACK, black_drawback)
-
-    print(f"Set drawback for White: {white_drawback}")
-    print(f"Set drawback for Black: {black_drawback}")
-
+def assign_drawbacks(board):
+    board.set_drawback(chess.WHITE, "no_knight_moves")
+    board.set_drawback(chess.BLACK, "no_knight_moves")
+    print("Drawbacks: no_knight_moves assigned to both players.")
 
 def display_winner(screen, winner_color):
     """Display the winner and stop the game."""
@@ -74,7 +60,7 @@ def main():
 
     load_images()
     board = DrawbackBoard()
-    assign_random_drawbacks(board)
+    assign_drawbacks(board)
     board.reset()
 
     global game_over, winner_color
@@ -119,7 +105,7 @@ def main():
                 elif event.key == p.K_r:
                     # Reset board and game state properly
                     board = DrawbackBoard()
-                    assign_random_drawbacks(board)
+                    assign_drawbacks(board)
                     board.reset()
 
                     selected_square = None

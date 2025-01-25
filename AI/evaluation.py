@@ -5,18 +5,37 @@ from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import get_drawback_info
 
 class Score(Enum):
+    """Defines piece values and game evaluation constants."""
     PAWN = np.int32(100)
     KNIGHT = np.int32(300)
     BISHOP = np.int32(300)
     ROOK = np.int32(500)
     QUEEN = np.int32(900)
-    CHECKMATE = np.int32(-1000000)
-    MOVE = np.int32(5)
+    KING = np.int32(10000)  # High value to make AI prioritize king safety
+    CHECKMATE = np.int32(1000000)  # Winning state
+    MOVE = np.int32(5)  # Mobility bonus
 
 def evaluate(board):
-    """Evaluates the board position considering drawbacks."""
+    """
+    Evaluates the board position considering:
+    - Piece values (adjusted by drawbacks).
+    - King safety (recognizing captures as instant wins).
+    - Mobility (more moves = better position).
+    - Positional evaluation (encouraging good piece placement).
+    """
+
+    # If a king is missing, instantly return win/loss
+    white_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.WHITE for piece in board.piece_map().values())
+    black_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.BLACK for piece in board.piece_map().values())
+
+    if not black_king_alive:  # White wins by capturing the Black king
+        return Score.CHECKMATE.value
+    if not white_king_alive:  # Black wins by capturing the White king
+        return -Score.CHECKMATE.value
+
+    # If the player has no legal moves, they lose
     if board.is_variant_loss():
-        return Score.CHECKMATE.value  # Player loses if they have no legal moves
+        return -Score.CHECKMATE.value
 
     return eval_pieces(board) + eval_moves(board) + eval_positional(board)
 
@@ -32,10 +51,11 @@ def get_piece_value(board, piece_type, color):
         chess.KNIGHT: Score.KNIGHT.value,
         chess.BISHOP: Score.BISHOP.value,
         chess.ROOK: Score.ROOK.value,
-        chess.QUEEN: Score.QUEEN.value
+        chess.QUEEN: Score.QUEEN.value,
+        chess.KING: Score.KING.value  # King should be prioritized
     }
 
-    # Get drawback effect
+    # Apply drawback modification
     if active_drawback:
         drawback_info = get_drawback_info(active_drawback)
         if drawback_info and "piece_value_override" in drawback_info:
@@ -61,7 +81,8 @@ def eval_pieces(board):
         + piece_diff(board, chess.KNIGHT)
         + piece_diff(board, chess.BISHOP)
         + piece_diff(board, chess.ROOK)
-        + piece_diff(board, chess.QUEEN))
+        + piece_diff(board, chess.QUEEN)
+        + piece_diff(board, chess.KING))  # King should be included for proper evaluation
 
 def eval_moves(board):
     """
@@ -71,13 +92,15 @@ def eval_moves(board):
     num_moves = len(list(board.legal_moves))  # Uses drawback-aware move generation
 
     if num_moves == 0:
-        return Score.CHECKMATE.value  # Loss condition
+        return -Score.CHECKMATE.value  # Losing position
 
     return Score.MOVE.value * np.int32(num_moves)
 
 def eval_positional(board):
     """
     Evaluates piece placement using default or drawback-modified tables.
+    - Encourages control of the center (D4, D5, E4, E5).
+    - Applies any drawback-based positional penalties or bonuses.
     """
     score = 0
     active_drawback = board.get_active_drawback(board.turn)
