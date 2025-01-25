@@ -14,14 +14,19 @@ FPS = 15
 def assign_random_drawbacks(board):
     available_drawbacks = list(DRAWBACKS.keys())
 
-    drawback = random.choice(available_drawbacks)
+    if not available_drawbacks:
+        print("Warning: No drawbacks available to assign.")
+        white_drawback = None
+    else:
+        white_drawback = random.choice(available_drawbacks)
 
-    board.set_drawback(chess.WHITE, drawback)
-    board.set_drawback(chess.BLACK, drawback)  # Opponent's drawback is unknown
+    board.set_drawback(chess.WHITE, white_drawback)
+    # For debugging, assign a known drawback to Black as well
+    # Remove or comment out the next line in production
+    # board.set_drawback(chess.BLACK, "no_knight_moves")  # Assigning known drawback for debugging
 
     # Debug print
-    print(f"Assigned drawback - White: {drawback}, Black: UNKNOWN")
-
+    print(f"Assigned drawback - White: {white_drawback}, Black: UNKNOWN")
 
 # Display winner message and wait for restart
 def display_winner(screen, winner_color):
@@ -41,8 +46,8 @@ def main():
 
     load_images()
     board = DrawbackBoard()
-    assign_random_drawbacks(board)
-    board.reset()
+    board.reset()  # Reset first to ensure a clean state
+    assign_random_drawbacks(board)  # Then assign drawbacks
 
     running = True
     flipped = True

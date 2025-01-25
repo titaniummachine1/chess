@@ -122,7 +122,12 @@ def draw_highlights(screen, board_obj, selected_square, flipped=False):
         drow = 7 - end_row if flipped else end_row
         dcol = 7 - end_col if flipped else end_col
 
-        move_candidate = chess.Move(start_sq, dest_sq)
+        move_candidate = chess.Move(start_sq, dest_sq)     
+        
+        # Check if this move is still legal after drawback filtering
+        if move_candidate not in board_obj.legal_moves:
+            continue  # Skip if the move isn't actually legal
+
         is_capture = board_obj.is_capture(move_candidate)
 
         if is_capture:
