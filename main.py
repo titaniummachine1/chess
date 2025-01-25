@@ -12,21 +12,15 @@ SQ_SIZE = HEIGHT // DIMENSION
 FPS = 15
 
 def assign_random_drawbacks(board):
-    available_drawbacks = list(DRAWBACKS.keys())
-
-    if not available_drawbacks:
-        print("Warning: No drawbacks available to assign.")
-        white_drawback = None
-    else:
-        white_drawback = random.choice(available_drawbacks)
-
-    board.set_drawback(chess.WHITE, white_drawback)
-    # For debugging, assign a known drawback to Black as well
-    # Remove or comment out the next line in production
-    # board.set_drawback(chess.BLACK, "no_knight_moves")  # Assigning known drawback for debugging
+    """Assigns the 'no_knight_moves' drawback to both players."""
+    
+    drawback = "no_knight_moves"  # Set fixed drawback for both players
+    
+    board.set_drawback(chess.WHITE, drawback)
+    board.set_drawback(chess.BLACK, drawback)
 
     # Debug print
-    print(f"Assigned drawback - White: {white_drawback}, Black: UNKNOWN")
+    print(f"Assigned drawback - White: {drawback}, Black: {drawback}")
 
 # Display winner message and wait for restart
 def display_winner(screen, winner_color):

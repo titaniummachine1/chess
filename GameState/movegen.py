@@ -21,8 +21,13 @@ class DrawbackBoard(chess.Board):
         self.drawbacks = {chess.WHITE: None, chess.BLACK: None}
 
     def set_drawback(self, color, drawback_name):
-        """Assign a named drawback to a specific color."""
+        """Assign a named drawback to a specific player."""
+        if color not in [chess.WHITE, chess.BLACK]:
+            raise ValueError("Invalid color for drawback assignment.")
+        
         self.drawbacks[color] = drawback_name
+        print(f"Set drawback for {'White' if color == chess.WHITE else 'Black'}: {drawback_name}")
+
 
     def get_active_drawback(self, color):
         """Returns the current drawback for the given color."""
@@ -127,31 +132,20 @@ class DrawbackBoard(chess.Board):
         return False
 
     def generate_legal_moves(self, from_mask=chess.BB_ALL, to_mask=chess.BB_ALL):
-        """
-        1) If the game is lost, yield no moves.
-        2) Generate pseudo-legal moves (ignoring check).
-        3) Filter them by the active drawback's "illegal_moves" if any.
-        4) Force-add any special "pawn captures king" moves if they are not in the list.
-        """
+        """Generate legal moves while filtering out ones restricted by the current player's drawback."""
+
         if self.is_variant_loss():
             return iter([])
 
-        # Step 2: Generate pseudo-legal moves ignoring check
+        # Step 1: Get all pseudo-legal moves
         moves = list(super().generate_pseudo_legal_moves(from_mask, to_mask))
 
-        # Step 4: Force-add special "pawn capturing king" moves
-        moves += self._force_pawn_king_captures()
-
-        # Step 3: Filter out moves restricted by active drawback
-        active_drawback = self.get_active_drawback(self.turn)
-        if active_drawback:
-            drawback_info = get_drawback_info(active_drawback)
+        # Step 2: Apply drawback filtering for the player currently moving
+        current_drawback = self.get_active_drawback(self.turn)  # Only apply current player's drawback
+        if current_drawback:
+            drawback_info = get_drawback_info(current_drawback)
             if drawback_info and "illegal_moves" in drawback_info:
-                filtered = []
-                for m in moves:
-                    if not drawback_info["illegal_moves"](self, self.turn, m):
-                        filtered.append(m)
-                moves = filtered
+                moves = [m for m in moves if not drawback_info["illegal_moves"](self, self.turn, m)]
 
         return iter(moves)
 
