@@ -112,8 +112,8 @@ def draw_highlights(screen, board_obj, selected_square, flipped=False):
 
     start_sq = row * 8 + col
 
-    # Instead of board_obj.legal_moves, call generate_legal_moves().
-    all_legal_moves = list(board_obj.generate_legal_moves())
+    # Use board_obj.legal_moves to get the filtered legal moves
+    all_legal_moves = list(board_obj.legal_moves)
     valid_dest_squares = [mv.to_square for mv in all_legal_moves if mv.from_square == start_sq]
 
     for dest_sq in valid_dest_squares:
@@ -123,10 +123,6 @@ def draw_highlights(screen, board_obj, selected_square, flipped=False):
         dcol = 7 - end_col if flipped else end_col
 
         move_candidate = chess.Move(start_sq, dest_sq)     
-        
-        # Check if this move is still legal after drawback filtering
-        if move_candidate not in board_obj.legal_moves:
-            continue  # Skip if the move isn't actually legal
 
         is_capture = board_obj.is_capture(move_candidate)
 

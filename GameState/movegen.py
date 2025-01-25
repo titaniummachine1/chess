@@ -153,11 +153,10 @@ class DrawbackBoard(chess.Board):
                     if not drawback_info["illegal_moves"](self, self.turn, m):
                         filtered.append(m)
                     else:
-                        print(f"Drawback '{active_drawback}' blocked move: {m}")
+                        assert drawback_info["illegal_moves"](self, self.turn, m), f"Move {m} should be blocked by drawback {active_drawback}"
                 moves = filtered
 
         return iter(moves)
-
 
     def is_legal(self, move):
         """
@@ -226,4 +225,6 @@ class DrawbackBoard(chess.Board):
         """
         new_board = DrawbackBoard(fen=self.fen())
         new_board.drawbacks = self.drawbacks.copy()
+        return new_board
+
         return new_board
