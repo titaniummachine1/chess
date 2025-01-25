@@ -1,3 +1,4 @@
+##main.py do nto remove this comment you damn idiot
 import pygame as p
 import chess
 import random
@@ -6,14 +7,15 @@ from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
 from AI.search import best_move
 
+# Game Settings
 WIDTH, HEIGHT = 680, 680
 DIMENSION = 8
 SQ_SIZE = HEIGHT // DIMENSION
 FPS = 15
-AI_DEPTH = 2
+AI_DEPTH = 3  # Adjust AI search depth (higher = stronger)
 
-WHITE_AI = False
-BLACK_AI = True
+WHITE_AI = False  # Set to True if you want White to be controlled by AI
+BLACK_AI = True   # Set to True if you want Black to be controlled by AI
 
 def assign_drawbacks(board):
     board.set_drawback(chess.WHITE, "no_knight_moves")
@@ -21,6 +23,7 @@ def assign_drawbacks(board):
     print("Drawbacks: no_knight_moves assigned to both players.")
 
 def display_winner(screen, winner_color):
+    """Display the winner and stop the game."""
     font = p.font.Font(None, 50)
     text = f"{'White' if winner_color == chess.WHITE else 'Black'} wins! Press 'R' to restart."
     text_surf = font.render(text, True, p.Color("black"), p.Color("gold"))
@@ -29,12 +32,16 @@ def display_winner(screen, winner_color):
     p.display.flip()
 
 def ai_move(board):
+    """Executes AI move if it's AI's turn and the game isn't over."""
     global game_over, winner_color
+
     if not board.is_variant_end():
         move = best_move(board, AI_DEPTH)
         if move:
             board.push(move)
             print(f"AI moved: {move}")
+
+            # Check if the AI won instantly
             if board.is_variant_end():
                 game_over = True
                 winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
@@ -43,6 +50,7 @@ def ai_move(board):
             print("AI has no legal moves!")
 
 def main():
+    """Main game loop for Drawback Chess."""
     p.init()
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
@@ -55,7 +63,10 @@ def main():
 
     global game_over, winner_color
     running = True
+
+    # IMPORTANT: flipped = False means White on bottom by default
     flipped = True
+
     selected_square = None
     game_over = False
     winner_color = None
@@ -70,8 +81,12 @@ def main():
                 if not (WHITE_AI and board.turn == chess.WHITE) and not (BLACK_AI and board.turn == chess.BLACK):
                     x, y = event.pos
                     row, col = y // SQ_SIZE, x // SQ_SIZE
+
+                    # INVERT the flipping logic:
+                    # if flipped is True => invert row, col => Black on bottom
                     if flipped:
                         row, col = 7 - row, 7 - col
+
                     clicked_square = row * 8 + col
 
                     if selected_square is None:
@@ -82,7 +97,7 @@ def main():
                         new_selected_square = apply_legal_move(board, move_coords, selected_square)
                         selected_square = new_selected_square
 
-                        draw_board(screen, DIMENSION, WIDTH, HEIGHT)
+                        draw_board(screen, DIMENSION, WIDTH, HEIGHT, flipped)
                         draw_pieces(screen, board, flipped, DIMENSION)
                         p.display.flip()
 
@@ -92,14 +107,19 @@ def main():
 
             elif event.type == p.KEYDOWN:
                 if event.key == p.K_f:
+                    # Flip the board
                     flipped = not flipped
+                    print("Board flipping:", flipped)
                 elif event.key == p.K_r:
+                    # Reset board and game state properly
                     board = DrawbackBoard()
                     assign_drawbacks(board)
                     board.reset()
+
                     selected_square = None
                     game_over = False
                     winner_color = None
+
                     print("Game restarted!")
 
         if not game_over:
@@ -109,7 +129,7 @@ def main():
             if WHITE_AI and board.turn == chess.WHITE:
                 ai_move(board)
 
-        draw_board(screen, DIMENSION, WIDTH, HEIGHT)
+        draw_board(screen, DIMENSION, WIDTH, HEIGHT, flipped)
         if selected_square is not None:
             draw_highlights(screen, board, selected_square, flipped)
         draw_pieces(screen, board, flipped, DIMENSION)

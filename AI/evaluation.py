@@ -12,8 +12,30 @@ class Score(Enum):
     ROOK = np.int32(500)
     QUEEN = np.int32(900)
     KING = np.int32(10000)  # High value to make AI prioritize king safety
-    CHECKMATE = np.int32(1000000)  # Winning state
+    CHECKMATE = np.int32(100000)  # Winning state
     MOVE = np.int32(5)  # Mobility bonus
+
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 10000  # King value is very high because capturing the king ends the game
+}
+
+def evaluate_board(board):
+    """
+    Evaluates the board position.
+    """
+    if board.is_variant_win():
+        return float('inf') if board.turn == chess.WHITE else float('-inf')
+    if board.is_variant_loss():
+        return float('-inf') if board.turn == chess.WHITE else float('inf')
+
+    material = sum(PIECE_VALUES[piece.piece_type] * (1 if piece.color == chess.WHITE else -1)
+                   for piece in board.piece_map().values())
+    return material
 
 def evaluate(board):
     """
