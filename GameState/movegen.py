@@ -132,22 +132,23 @@ class DrawbackBoard(chess.Board):
         return False
 
     def generate_legal_moves(self, from_mask=chess.BB_ALL, to_mask=chess.BB_ALL):
-        """Generate legal moves while filtering out ones restricted by the current player's drawback."""
+        """Ensure AI and player moves respect drawbacks."""
 
         if self.is_variant_loss():
             return iter([])
 
-        # Step 1: Get all pseudo-legal moves
+        # Generate base pseudo-legal moves
         moves = list(super().generate_pseudo_legal_moves(from_mask, to_mask))
 
-        # Step 2: Apply drawback filtering for the player currently moving
-        current_drawback = self.get_active_drawback(self.turn)  # Only apply current player's drawback
-        if current_drawback:
-            drawback_info = get_drawback_info(current_drawback)
+        # Apply drawback filtering for the current player
+        active_drawback = self.get_active_drawback(self.turn)
+        if active_drawback:
+            drawback_info = get_drawback_info(active_drawback)
             if drawback_info and "illegal_moves" in drawback_info:
                 moves = [m for m in moves if not drawback_info["illegal_moves"](self, self.turn, m)]
 
-        return iter(moves)
+        return iter(moves)  # Ensure only filtered moves are returned
+
 
     def is_legal(self, move):
         """
@@ -220,3 +221,10 @@ class DrawbackBoard(chess.Board):
                     forced_moves.append(chess.Move(pawn_sq, diag_right))
 
         return forced_moves
+    
+    def copy(self):
+        """Creates a deep copy of the board, preserving drawbacks."""
+        new_board = DrawbackBoard(fen=self.fen())
+        new_board.drawbacks = self.drawbacks.copy()
+        return new_board
+
