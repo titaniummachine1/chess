@@ -6,14 +6,15 @@ from AI.search import negamax, score_move
 
 # Global variables to track AI state
 ai_thinking = False
-ai_search_complete = False  # New flag to track if search reached desired depth
+ai_search_complete = False
 ai_current_depth = 0
-ai_target_depth = 0  # Track the target depth
+ai_completed_depth = 0  # Track the highest completed depth
+ai_target_depth = 0
 ai_best_move = None
 ai_progress = ""
 ai_board_position = None
-ai_start_time = None  # Track when search started
-ai_min_think_time = 0.8  # Minimum thinking time in seconds
+ai_start_time = None
+ai_min_think_time = 0.8
 
 def iterative_deepening_search(board, max_depth, time_limit=5.0):
     """
@@ -21,8 +22,8 @@ def iterative_deepening_search(board, max_depth, time_limit=5.0):
     Uses a time limit to ensure the AI doesn't take too long.
     Returns the best move found within the time limit.
     """
-    global ai_thinking, ai_search_complete, ai_current_depth, ai_target_depth
-    global ai_best_move, ai_progress, ai_board_position, ai_start_time
+    global ai_thinking, ai_search_complete, ai_current_depth, ai_completed_depth
+    global ai_target_depth, ai_best_move, ai_progress, ai_board_position, ai_start_time
     
     ai_thinking = True
     ai_search_complete = False
@@ -42,7 +43,8 @@ def iterative_deepening_search(board, max_depth, time_limit=5.0):
         captured_piece = board.piece_at(move.to_square)
         if captured_piece and captured_piece.piece_type == chess.KING:
             ai_best_move = move
-            ai_progress = f"Found king capture!"
+            ai_progress = f"Found king capture"
+            ai_completed_depth = 1  # Set completed depth
             # Even with king capture, enforce minimum think time
             ensure_min_think_time()
             ai_search_complete = True
@@ -59,7 +61,7 @@ def iterative_deepening_search(board, max_depth, time_limit=5.0):
             break
         
         ai_current_depth = depth
-        ai_progress = f"Searching at depth {depth}..."
+        ai_progress = f"Searching..."
         
         alpha = -float('inf')
         beta = float('inf')
@@ -85,7 +87,8 @@ def iterative_deepening_search(board, max_depth, time_limit=5.0):
         
         if best_move:
             ai_best_move = best_move
-            ai_progress = f"Depth {depth}: {best_move}, score {best_score}"
+            ai_completed_depth = depth  # Update the completed depth
+            ai_progress = f"Found move"
             
             # Mark as complete when we reach the target depth
             if depth >= ai_target_depth:
@@ -111,8 +114,8 @@ def async_best_move(board, max_depth):
     Start the AI search in a separate thread and return immediately.
     The result will be stored in ai_best_move when the search completes.
     """
-    global ai_thinking, ai_search_complete, ai_current_depth, ai_target_depth
-    global ai_best_move, ai_progress, ai_board_position
+    global ai_thinking, ai_search_complete, ai_current_depth, ai_completed_depth
+    global ai_target_depth, ai_best_move, ai_progress, ai_board_position
     
     # If AI is already thinking, don't start another search
     if ai_thinking:
@@ -122,7 +125,8 @@ def async_best_move(board, max_depth):
     ai_thinking = True
     ai_search_complete = False
     ai_current_depth = 0
-    ai_target_depth = max_depth  # Store target depth
+    ai_completed_depth = 0
+    ai_target_depth = max_depth
     ai_best_move = None
     ai_progress = "Starting search..."
     ai_board_position = board.fen()
@@ -153,19 +157,23 @@ def get_current_depth():
     """Returns the current search depth."""
     return ai_current_depth
 
+def get_completed_depth():
+    """Returns the highest completed search depth."""
+    return ai_completed_depth
+
 def get_target_depth():
     """Returns the target search depth."""
     return ai_target_depth
 
 def get_best_move():
-    """Returns the best move found so far, or None if the move isn't legal anymore."""
+    """Returns the best move found so far."""
     return ai_best_move
 
 def get_progress():
     """Returns a string describing the current search progress."""
-    global ai_start_time
+    global ai_start_time, ai_completed_depth, ai_target_depth
     elapsed_time = 0 if ai_start_time is None else time.time() - ai_start_time
-    return f"{ai_progress} ({elapsed_time:.1f}s)"
+    return f"Depth {ai_completed_depth}/{ai_target_depth} ({elapsed_time:.1f}s)"
 
 def get_board_position():
     """Returns the FEN of the position being evaluated."""

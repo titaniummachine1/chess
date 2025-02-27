@@ -56,6 +56,9 @@ flipped = False  # Make flipped global to be accessible in open_tinker_panel
 WHITE_AI = False
 BLACK_AI = True
 
+# Add a cooldown variable to prevent immediate AI re-thinking
+ai_move_cooldown = 0  # Frames to wait before allowing AI to think again
+
 # Button rect for Tinker Panel
 tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
 
@@ -200,8 +203,14 @@ def ai_move(board):
     """
     Executes AI move if it's AI's turn and the game isn't over.
     Uses the configured depth without forcing minimum depth.
+    Includes cooldown to prevent immediate re-thinking.
     """
-    global game_over, winner_color
+    global game_over, winner_color, ai_move_cooldown
+
+    # If on cooldown, just decrement and return
+    if ai_move_cooldown > 0:
+        ai_move_cooldown -= 1
+        return
 
     if not HAS_AI:
         print("AI module not available - skipping AI move")
@@ -222,6 +231,7 @@ def ai_move(board):
                     
                     board.push(move)
                     print(f"AI moved: {move}")
+                    ai_move_cooldown = FPS  # Set cooldown to 1 second (or FPS frames)
 
                     # Check if the AI won by capturing the king
                     if board.is_variant_end():
@@ -234,7 +244,7 @@ def ai_move(board):
                     async_best_move(board, AI_DEPTH)
         return
     
-    # Start a new AI search if not already thinking
+    # Start a new AI search if not already thinking and not on cooldown
     if not board.is_variant_end():
         # Use the configured depth without enforcing minimum
         async_best_move(board, AI_DEPTH)
@@ -253,12 +263,15 @@ def change_drawback(board, color, new_drawback=None):
 
 def main():
     """Main game loop for Drawback Chess."""
-    global game_over, winner_color, WHITE_AI, BLACK_AI, flipped
+    global game_over, winner_color, WHITE_AI, BLACK_AI, flipped, ai_move_cooldown
     
     p.init()
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
     p.display.set_caption("Drawback Chess")  # Fixed: setCaption -> set_caption
+
+    # Initialize cooldown
+    ai_move_cooldown = 0
 
     board = DrawbackBoard()
     assign_random_drawbacks(board)  # Assign random drawbacks to each player
@@ -386,7 +399,7 @@ def main():
         # Clear screen before drawing
         screen.fill(p.Color("black"))
 
-        # Draw the board and pieces with consistent offsets
+        # Draw the board and pieces with both offsets
         draw_board(screen, DIMENSION, BOARD_HEIGHT, BOARD_HEIGHT, flipped, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         draw_pieces(screen, board, flipped, DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         
@@ -396,8 +409,10 @@ def main():
         draw_tinker_button(screen)
         
         # Display AI thinking status if available
-        if 'display_ai_status' in globals():
+        try:
             display_ai_status(screen, board)
+        except Exception as e:
+            print(f"Error displaying AI status: {e}")
         
         # Highlight the selected square and legal moves
         if selected_square is not None:
@@ -435,6 +450,6 @@ def main():
     # Clean up and exit
     p.quit()
 
-# Make sure main() is called when the script is run directly
+# IMPORTANT: Add this line to actually run the game
 if __name__ == "__main__":
     main()
