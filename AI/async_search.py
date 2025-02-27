@@ -1,180 +1,134 @@
 import threading
 import time
-import copy
 import chess
-from AI.search import negamax, score_move
+from AI.search import best_move as search_best_move
 
-# Global variables to track AI state
-ai_thinking = False
-ai_search_complete = False
-ai_current_depth = 0
-ai_completed_depth = 0  # Track the highest completed depth
-ai_target_depth = 0
-ai_best_move = None
-ai_progress = ""
-ai_board_position = None
-ai_start_time = None
-ai_min_think_time = 0.8
-
-def iterative_deepening_search(board, max_depth, time_limit=5.0):
-    """
-    Performs iterative deepening search starting from depth 1 up to max_depth.
-    Uses a time limit to ensure the AI doesn't take too long.
-    Returns the best move found within the time limit.
-    """
-    global ai_thinking, ai_search_complete, ai_current_depth, ai_completed_depth
-    global ai_target_depth, ai_best_move, ai_progress, ai_board_position, ai_start_time
-    
-    ai_thinking = True
-    ai_search_complete = False
-    ai_best_move = None
-    ai_board_position = board.fen()
-    ai_start_time = time.time()
-    
-    # Start with all legal moves
-    moves = list(board.legal_moves)
-    if not moves:
-        ai_thinking = False
-        ai_progress = "No legal moves"
-        return None
-    
-    # Check for immediate king captures
-    for move in moves:
-        captured_piece = board.piece_at(move.to_square)
-        if captured_piece and captured_piece.piece_type == chess.KING:
-            ai_best_move = move
-            ai_progress = f"Found king capture"
-            ai_completed_depth = 1  # Set completed depth
-            # Even with king capture, enforce minimum think time
-            ensure_min_think_time()
-            ai_search_complete = True
-            ai_thinking = False
-            return move
-    
-    # Sort moves for better pruning using basic heuristic
-    moves.sort(key=lambda mv: score_move(board, mv), reverse=True)
-    
-    # Start iterative deepening
-    for depth in range(1, max_depth + 1):
-        if time.time() - ai_start_time > time_limit:
-            # Time limit reached, return the best move from previous depth
-            break
-        
-        ai_current_depth = depth
-        ai_progress = f"Searching..."
-        
-        alpha = -float('inf')
-        beta = float('inf')
-        best_score = -float('inf')
-        best_move = None
-        
-        for move in moves:
-            # Make a copy of the board to avoid modifying the original
-            new_board = board.copy()
-            new_board.push(move)
-            
-            # Search deeper
-            score = -negamax(new_board, depth - 1, -beta, -alpha)
-            
-            if score > best_score:
-                best_score = score
-                best_move = move
-                alpha = max(alpha, score)
-            
-            # Check if time limit is exceeded during search
-            if time.time() - ai_start_time > time_limit:
-                break
-        
-        if best_move:
-            ai_best_move = best_move
-            ai_completed_depth = depth  # Update the completed depth
-            ai_progress = f"Found move"
-            
-            # Mark as complete when we reach the target depth
-            if depth >= ai_target_depth:
-                # Still enforce minimum think time
-                ensure_min_think_time()
-                ai_search_complete = True
-    
-    # Search completed or timed out
-    ai_search_complete = True
-    ai_thinking = False
-    return ai_best_move
-
-def ensure_min_think_time():
-    """Ensure AI thinks for at least the minimum time to avoid instant moves"""
-    global ai_start_time, ai_min_think_time
-    
-    elapsed = time.time() - ai_start_time
-    if elapsed < ai_min_think_time:
-        time.sleep(ai_min_think_time - elapsed)
-
-def async_best_move(board, max_depth):
-    """
-    Start the AI search in a separate thread and return immediately.
-    The result will be stored in ai_best_move when the search completes.
-    """
-    global ai_thinking, ai_search_complete, ai_current_depth, ai_completed_depth
-    global ai_target_depth, ai_best_move, ai_progress, ai_board_position
-    
-    # If AI is already thinking, don't start another search
-    if ai_thinking:
-        return None
-    
-    # Reset state
-    ai_thinking = True
-    ai_search_complete = False
-    ai_current_depth = 0
-    ai_completed_depth = 0
-    ai_target_depth = max_depth
-    ai_best_move = None
-    ai_progress = "Starting search..."
-    ai_board_position = board.fen()
-    
-    # Create a deep copy of the board to avoid any shared state issues
-    board_copy = board.copy()
-    
-    # Start the search in a separate thread
-    thread = threading.Thread(
-        target=iterative_deepening_search,
-        args=(board_copy, max_depth),
-        daemon=True
-    )
-    thread.start()
-    
-    # Return immediately, the result will be stored in ai_best_move
-    return None
+# Global variables to track search state
+_thinking = False
+_best_move = None
+_completed_depth = 0
+_target_depth = 0
+_search_complete = False
+_start_time = 0
+_lock = threading.Lock()
 
 def is_thinking():
-    """Returns whether the AI is currently thinking."""
-    return ai_thinking
+    """Returns True if the AI is currently calculating a move."""
+    with _lock:
+        return _thinking
 
 def is_search_complete():
-    """Returns whether the AI search has completed to the desired depth."""
-    return ai_search_complete
-
-def get_current_depth():
-    """Returns the current search depth."""
-    return ai_current_depth
-
-def get_completed_depth():
-    """Returns the highest completed search depth."""
-    return ai_completed_depth
-
-def get_target_depth():
-    """Returns the target search depth."""
-    return ai_target_depth
+    """Returns True if the search has completed to the target depth."""
+    with _lock:
+        return _search_complete
 
 def get_best_move():
     """Returns the best move found so far."""
-    return ai_best_move
+    with _lock:
+        return _best_move
+
+def get_completed_depth():
+    """Returns the depth to which search has been completed."""
+    with _lock:
+        return _completed_depth
+
+def get_target_depth():
+    """Returns the target depth for the current search."""
+    with _lock:
+        return _target_depth
 
 def get_progress():
-    """Returns a string describing the current search progress."""
-    global ai_start_time, ai_completed_depth, ai_target_depth
-    elapsed_time = 0 if ai_start_time is None else time.time() - ai_start_time
-    return f"Depth {ai_completed_depth}/{ai_target_depth} ({elapsed_time:.1f}s)"
+    """Returns a string indicating search progress."""
+    with _lock:
+        elapsed = time.time() - _start_time if _thinking else 0
+        depth_info = f"Depth: {_completed_depth}/{_target_depth}" if _thinking else "Not searching"
+        time_info = f"Time: {elapsed:.1f}s" if _thinking else ""
+        return f"{depth_info} {time_info}"
 
-def get_board_position():
-    """Returns the FEN of the position being evaluated."""
-    return ai_board_position
+def reset_ai_state():
+    """Resets all AI search state variables."""
+    global _thinking, _best_move, _completed_depth, _target_depth, _search_complete, _start_time
+    with _lock:
+        _thinking = False
+        _best_move = None
+        _completed_depth = 0
+        _target_depth = 0
+        _search_complete = False
+        _start_time = 0
+    print("AI search state reset")
+
+def _search_thread(board, max_depth):
+    """Background thread function to perform iterative deepening search."""
+    global _thinking, _best_move, _completed_depth, _target_depth, _search_complete, _start_time
+
+    try:
+        # Safety check to avoid searching on completed game
+        if board.is_variant_end():
+            with _lock:
+                _thinking = False
+                _search_complete = True
+            print("Game already ended - search canceled")
+            return
+
+        # Start with depth 1 and iteratively increase
+        for depth in range(1, max_depth + 1):
+            # Check if search has been canceled
+            if not is_thinking():
+                print(f"Search canceled at depth {depth}")
+                return
+
+            # Perform search at current depth
+            start = time.time()
+            move = search_best_move(board.copy(), depth)
+            end = time.time()
+
+            if move:
+                with _lock:
+                    _best_move = move
+                    _completed_depth = depth
+                print(f"Depth {depth} completed in {end-start:.2f}s - Best: {move}")
+
+        # Search completed to target depth
+        with _lock:
+            _search_complete = True
+            _thinking = False
+        print(f"Search completed to target depth {max_depth}")
+
+    except Exception as e:
+        print(f"Error in search thread: {e}")
+        with _lock:
+            _thinking = False
+
+def async_best_move(board, depth):
+    """
+    Start an asynchronous search for the best move.
+    Returns immediately while search continues in background.
+    """
+    global _thinking, _best_move, _completed_depth, _target_depth, _search_complete, _start_time
+
+    # Don't start a new search if one is already in progress
+    if is_thinking():
+        print("Search already in progress - ignoring new request")
+        return False
+
+    # Reset search state
+    reset_ai_state()
+    
+    with _lock:
+        _thinking = True
+        _target_depth = depth
+        _start_time = time.time()
+    
+    # Start search in a background thread
+    thread = threading.Thread(target=_search_thread, args=(board.copy(), depth))
+    thread.daemon = True  # Thread will be terminated when main program exits
+    thread.start()
+    
+    print(f"Started async search to depth {depth}")
+    return True
+
+def wait_for_ai():
+    """Wait until the AI completes its search."""
+    while is_thinking():
+        time.sleep(0.1)  # Short sleep to prevent CPU hogging
+    return get_best_move()
