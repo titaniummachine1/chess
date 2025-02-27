@@ -46,7 +46,9 @@ def negamax(board, depth, alpha, beta):
     
     # Base case for regular evaluation
     if depth == 0:
-        return evaluation.evaluate(board)
+        eval_score = evaluation.evaluate(board)
+        print(f"Depth 0 evaluation: {eval_score}")
+        return eval_score
 
     max_score = -evaluation.Score.CHECKMATE.value
     
@@ -88,6 +90,7 @@ def negamax(board, depth, alpha, beta):
             # beta cutoff
             break
 
+    print(f"Depth {depth} max score: {max_score}")
     return max_score
 
 def best_move(board, depth) -> int:

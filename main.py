@@ -202,24 +202,24 @@ def display_ai_status(screen, board):
 def ai_move(board):
     """
     Executes AI move if it's AI's turn and the game isn't over.
-    Improved to properly manage async search state.
+    Fixed to properly execute found moves.
     """
     global game_over, winner_color, ai_move_cooldown
 
     if not HAS_AI:
         print("AI module not available - skipping AI move")
-        return
+        return False
 
     # If game is already over, don't start AI
     if game_over or board.is_variant_end():
-        return
+        return False
         
     # If AI is already thinking, check if search is complete
     if is_thinking():
         if is_search_complete():
             # Get the best move found
             move = get_best_move()
-            print(f"AI search complete at depth {get_completed_depth()}: Found move {move}")
+            print(f"AI search complete at depth {get_completed_depth()}: Applied move {move}")
             
             if move and move in board.legal_moves:
                 # Check if this is a king capture move
@@ -230,10 +230,6 @@ def ai_move(board):
                 # Make the move
                 board.push(move)
                 print(f"AI moved: {move}")
-                ai_move_cooldown = FPS // 2  # Set cooldown to prevent immediate next turn
-                
-                # Reset AI state for next search
-                reset_ai_state()
                 
                 # Check if the AI won by capturing the king
                 if board.is_variant_end():
@@ -241,25 +237,33 @@ def ai_move(board):
                     winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
                     print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
                 
-                # Return here to prevent immediately starting another search
-                return
+                # Reset AI state for next search and set cooldown
+                reset_ai_state()
+                ai_move_cooldown = FPS // 2
+                return True  # Indicate a move was made
             else:
                 # Move is no longer valid
                 print("AI found move is no longer valid - resetting")
                 reset_ai_state()
         # If search is not complete, just continue waiting
-        return
+        return False
     
-    # Respect cooldown timer to prevent immediate AI move after making a move
+    # Respect cooldown timer before starting a new search
     if ai_move_cooldown > 0:
         ai_move_cooldown -= 1
-        return
+        return False
     
     # Start a new AI search if it's AI's turn and not already thinking
     if ((WHITE_AI and board.turn == chess.WHITE) or 
         (BLACK_AI and board.turn == chess.BLACK)):
         print(f"Starting AI search at depth {AI_DEPTH}")
-        async_best_move(board, AI_DEPTH)
+        success = async_best_move(board, AI_DEPTH)
+        # If we couldn't start a search (perhaps already running), wait a bit
+        if not success:
+            time.sleep(0.1)
+        return False  # No move made yet, search just started
+    
+    return False  # No move was made
 
 def change_drawback(board, color, new_drawback=None):
     """
@@ -289,22 +293,6 @@ def main():
     assign_random_drawbacks(board)  # Assign random drawbacks to each player
     board.reset()
     
-    # Print the FEN for debugging
-    print(f"Starting position FEN: {board.fen()}")
-    
-    # Debug the initial board state
-    for r in range(8):
-        rank_str = ""
-        for f in range(8):
-            sq = chess.square(f, r)  # file (0-7), rank (0-7)
-            piece = board.piece_at(sq)
-            if piece:
-                rank_str += piece.symbol() + " "
-            else:
-                rank_str += "· "
-        print(f"{8-r} {rank_str}")
-    print("  a b c d e f g h")
-
     running = True
 
     # Default orientation: White on bottom, Black on top
@@ -405,12 +393,21 @@ def main():
                     # Open Tinker's Control Panel
                     open_tinker_panel(board)
 
-        if not game_over:
-            # Let AI move if it's AI's turn
-            if BLACK_AI and board.turn == chess.BLACK and HAS_AI:
-                ai_move(board)
-            if WHITE_AI and board.turn == chess.WHITE and HAS_AI:
-                ai_move(board)
+            if not game_over:
+                # Track if a move was made this frame
+                move_made = False
+                
+                # Let AI move if it's their turn
+                if BLACK_AI and board.turn == chess.BLACK and HAS_AI and not move_made:
+                    move_made = ai_move(board)
+                    
+                # Only try White AI move if Black didn't just move
+                if WHITE_AI and board.turn == chess.WHITE and HAS_AI and not move_made:
+                    move_made = ai_move(board)
+                    
+                # Add a small delay if a move was made to make the game more visible
+                if move_made:
+                    p.time.delay(100)  # 100ms delay to see the move
 
         # Clear screen before drawing
         screen.fill(p.Color("black"))
