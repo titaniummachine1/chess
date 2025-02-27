@@ -148,6 +148,10 @@ def open_tinker_panel(board):
             white_drawback, black_drawback, updated_ai_settings, options = result
             
             # Update AI control flags
+            WHITE_AI = updated_ai_settings["WHITE_AI"]
+            BLACK_AI = updated_ai_settings["BLACK_AI"]
+            AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
+            
             # Handle flip board option
             if options.get("FLIP_BOARD", False):
                 flipped = not flipped
@@ -330,7 +334,10 @@ def main():
             if WHITE_AI and board.turn == chess.WHITE and HAS_AI:
                 ai_move(board)
 
-        # Draw the board and pieces with both offsets
+        # Clear screen before drawing
+        screen.fill(p.Color("black"))
+
+        # Draw the board and pieces with consistent offsets
         draw_board(screen, DIMENSION, BOARD_HEIGHT, BOARD_HEIGHT, flipped, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         draw_pieces(screen, board, flipped, DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         
@@ -341,13 +348,11 @@ def main():
         
         # Highlight the selected square and legal moves
         if selected_square is not None:
-            # Draw highlight for selected square
-            highlight_surf = p.Surface((SQ_SIZE, SQ_SIZE), p.SRCALPHA)
-            highlight_surf.fill((255, 255, 0, 100))
-            
-            # Calculate correct position for highlight
+            # Calculate correct position for highlight using the BOARD_HEIGHT for square size
+            square_size = BOARD_HEIGHT // DIMENSION
             row = chess.square_rank(selected_square)
             col = chess.square_file(selected_square)
+            
             if flipped:
                 draw_row = row
                 draw_col = 7 - col
@@ -355,12 +360,14 @@ def main():
                 draw_row = 7 - row
                 draw_col = col
                 
-            # Apply highlight
+            # Draw highlight
+            highlight_surf = p.Surface((square_size, square_size), p.SRCALPHA)
+            highlight_surf.fill((255, 255, 0, 100))
             screen.blit(highlight_surf, 
-                       (BOARD_X_OFFSET + draw_col * SQ_SIZE, 
-                        BOARD_Y_OFFSET + draw_row * SQ_SIZE))
+                       (BOARD_X_OFFSET + draw_col * square_size, 
+                        BOARD_Y_OFFSET + draw_row * square_size))
             
-            # Draw legal moves
+            # Draw legal move indicators
             draw_legal_move_indicators(screen, board, selected_square, flipped, 
                                       DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
 
