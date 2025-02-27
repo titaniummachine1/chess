@@ -151,7 +151,8 @@ def draw_highlights(screen, board, selected_square, flipped, dimension, offset_y
     if selected_square is None:
         return
         
-    square_size = dimension
+    # Use BOARD_HEIGHT for consistent square size
+    square_size = BOARD_HEIGHT // dimension
     
     # Highlight the selected square
     row = chess.square_rank(selected_square)
