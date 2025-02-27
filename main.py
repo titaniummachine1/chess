@@ -206,11 +206,6 @@ def ai_move(board):
     """
     global game_over, winner_color, ai_move_cooldown
 
-    # If on cooldown, just decrement and return
-    if ai_move_cooldown > 0:
-        ai_move_cooldown -= 1
-        return
-
     if not HAS_AI:
         print("AI module not available - skipping AI move")
         return
