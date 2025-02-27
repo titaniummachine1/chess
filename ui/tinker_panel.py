@@ -85,9 +85,9 @@ class TinkerPanel:
         )
         self.black_ai_checkbox.checked = self.ai_settings.get("BLACK_AI", True)
         
-        # AI Depth slider
+        # AI Depth slider - now goes up to 14
         self.ai_depth_slider = Slider(
-            self.width/2 - 120, 85, 240, 10, 1, 5,
+            self.width/2 - 120, 85, 240, 10, 1, 14,
             self.ai_settings.get("AI_DEPTH", 3),
             text="AI Depth"
         )

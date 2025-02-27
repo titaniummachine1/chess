@@ -22,6 +22,7 @@ except ImportError:
 
 try:
     from AI.search import best_move
+    from AI.async_search import async_best_move, is_thinking, get_best_move, get_current_depth, get_progress
     HAS_AI = True
 except ImportError:
     print("Warning: AI module not available.")
@@ -35,8 +36,9 @@ BOARD_Y_OFFSET = 80  # Space at the top for white info
 BOARD_X_OFFSET = 80  # Space at the left for board centering
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
-FPS = 12
+FPS = 60  # Increased for smoother UI during AI thinking
 AI_DEPTH = 3  # Adjust AI search depth (higher = stronger)
+AI_MAX_DEPTH = 14  # Maximum allowed depth
 
 # Important: Set the BOARD_HEIGHT in utils for consistent square sizing
 import utils
@@ -163,17 +165,49 @@ def open_tinker_panel(board):
     else:
         print("Tinker's Control Panel is not available due to missing pygame_gui.")
 
+def display_ai_status(screen, board):
+    """Display the AI thinking status if AI is active."""
+    if not HAS_AI or not is_thinking():
+        return
+    
+    font = p.font.SysFont(None, 20)
+    
+    # Determine which player's AI is thinking
+    player_color = "White" if board.turn == chess.WHITE else "Black"
+    drawback = board.get_active_drawback(board.turn) or "None"
+    drawback_name = drawback.replace("_", " ").title()
+    
+    # Create status text
+    status_text = f"{player_color} AI ({drawback_name}) - Depth: {get_current_depth()}"
+    thinking_text = get_progress()
+    
+    # Render text with background
+    status_surf = font.render(status_text, True, p.Color("white"), p.Color("darkblue"))
+    thinking_surf = font.render(thinking_text, True, p.Color("white"), p.Color("darkblue"))
+    
+    # Position on the right side of the screen
+    status_rect = status_surf.get_rect(topright=(WIDTH - 10, 40))
+    thinking_rect = thinking_surf.get_rect(topright=(WIDTH - 10, 65))
+    
+    # Draw to screen
+    screen.blit(status_surf, status_rect)
+    screen.blit(thinking_surf, thinking_rect)
+
 def ai_move(board):
-    """Executes AI move if it's AI's turn and the game isn't over."""
+    """
+    Executes AI move if it's AI's turn and the game isn't over.
+    Uses asynchronous processing to avoid UI lag.
+    """
     global game_over, winner_color
 
     if not HAS_AI:
         print("AI module not available - skipping AI move")
         return
 
-    if not board.is_variant_end():
-        move = best_move(board, AI_DEPTH)
-        if move:
+    # If AI is already thinking, check if it has a move ready
+    if is_thinking():
+        move = get_best_move()
+        if move is not None:
             # Check if this is a king capture move
             target = board.piece_at(move.to_square)
             if target and target.piece_type == chess.KING:
@@ -187,8 +221,11 @@ def ai_move(board):
                 game_over = True
                 winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
                 print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins by capturing the king!")
-        else:
-            print("AI has no legal moves!")
+        return
+    
+    # Otherwise, start a new AI search
+    if not board.is_variant_end():
+        async_best_move(board, AI_DEPTH)
 
 def change_drawback(board, color, new_drawback=None):
     """
@@ -346,6 +383,10 @@ def main():
         display_current_turn(screen, board)
         draw_tinker_button(screen)
         
+        # Display AI thinking status if available
+        if 'display_ai_status' in globals():
+            display_ai_status(screen, board)
+        
         # Highlight the selected square and legal moves
         if selected_square is not None:
             # Calculate correct position for highlight using the BOARD_HEIGHT for square size
@@ -371,13 +412,17 @@ def main():
             draw_legal_move_indicators(screen, board, selected_square, flipped, 
                                       DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
 
+        # Display winner if game over
         if game_over and winner_color is not None:
             display_winner(screen, winner_color)
 
+        # Update the display
         clock.tick(FPS)
         p.display.flip()
 
+    # Clean up and exit
     p.quit()
 
+# Make sure main() is called when the script is run directly
 if __name__ == "__main__":
     main()
