@@ -35,7 +35,8 @@ BLACK_AI = True   # Set to True if you want Black to be controlled by AI
 AVAILABLE_DRAWBACKS = [
     "no_knight_moves",
     "no_bishop_captures",
-    "no_knight_captures"
+    "no_knight_captures",
+    "punching_down"  # Added the new drawback
 ]
 
 def assign_random_drawbacks(board):

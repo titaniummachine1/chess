@@ -191,9 +191,36 @@ def eval_drawback_specific(board):
                     elif piece.piece_type == chess.BISHOP and rank >= 2:  # Bishop developed
                         score += 10
         
+        # If White has punching down restriction, prioritize protecting valuable pieces
+        elif white_drawback == "punching_down":
+            # Bonus for having pawns near valuable pieces
+            for square, piece in board.piece_map().items():
+                if piece.color == chess.WHITE and piece.piece_type in [chess.QUEEN, chess.ROOK]:
+                    # Check for pawn protection
+                    piece_rank = chess.square_rank(square)
+                    piece_file = chess.square_file(square)
+                    # Look for pawns that can protect this piece
+                    for pawn_offset in [(-1, -1), (-1, 1)]:  # Diagonal squares a pawn would defend from
+                        pr, pf = piece_rank + pawn_offset[0], piece_file + pawn_offset[1]
+                        if 0 <= pr < 8 and 0 <= pf < 8:
+                            pawn_sq = chess.square(pf, pr)
+                            pawn = board.piece_at(pawn_sq)
+                            if pawn and pawn.piece_type == chess.PAWN and pawn.color == chess.WHITE:
+                                score += 15  # Bonus for having a pawn protecting valuable piece
+        
         # If Black can't capture with knights or bishops, that's an advantage for White
         if black_drawback in ["no_knight_captures", "no_bishop_captures"]:
             score += 15  # Generic bonus for opponent's capture restriction
+            
+        # If Black has "punching down", White should prioritize exposing their queen
+        if black_drawback == "punching_down":
+            # Look for opportunities to attack with queen
+            for square, piece in board.piece_map().items():
+                if piece.color == chess.WHITE and piece.piece_type == chess.QUEEN:
+                    # Bonus for queen mobility - number of squares it can move to
+                    queen_mobility = sum(1 for move in board.legal_moves 
+                                         if move.from_square == square)
+                    score += queen_mobility * 2  # Each mobility square is worth 2 points
             
     else:
         # Black is playing
@@ -209,8 +236,35 @@ def eval_drawback_specific(board):
                     elif piece.piece_type == chess.BISHOP and rank <= 5:  # Bishop developed
                         score += 10
         
+        # If Black has punching down restriction, prioritize protecting valuable pieces
+        elif black_drawback == "punching_down":
+            # Bonus for having pawns near valuable pieces
+            for square, piece in board.piece_map().items():
+                if piece.color == chess.BLACK and piece.piece_type in [chess.QUEEN, chess.ROOK]:
+                    # Check for pawn protection
+                    piece_rank = chess.square_rank(square)
+                    piece_file = chess.square_file(square)
+                    # Look for pawns that can protect this piece
+                    for pawn_offset in [(1, -1), (1, 1)]:  # Diagonal squares a pawn would defend from
+                        pr, pf = piece_rank + pawn_offset[0], piece_file + pawn_offset[1]
+                        if 0 <= pr < 8 and 0 <= pf < 8:
+                            pawn_sq = chess.square(pf, pr)
+                            pawn = board.piece_at(pawn_sq)
+                            if pawn and pawn.piece_type == chess.PAWN and pawn.color == chess.BLACK:
+                                score += 15  # Bonus for having a pawn protecting valuable piece
+        
         # If White can't capture with knights or bishops, that's an advantage for Black
         if white_drawback in ["no_knight_captures", "no_bishop_captures"]:
             score += 15  # Generic bonus for opponent's capture restriction
+        
+        # If White has "punching down", Black should prioritize exposing their queen
+        if white_drawback == "punching_down":
+            # Look for opportunities to attack with queen
+            for square, piece in board.piece_map().items():
+                if piece.color == chess.BLACK and piece.piece_type == chess.QUEEN:
+                    # Bonus for queen mobility - number of squares it can move to
+                    queen_mobility = sum(1 for move in board.legal_moves 
+                                         if move.from_square == square)
+                    score += queen_mobility * 2  # Each mobility square is worth 2 points
     
     return score
