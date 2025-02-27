@@ -11,12 +11,16 @@ class TinkerPanel:
     - Split screen with White drawbacks on left, Black on right
     - Search functionality to find drawbacks by name
     - Immediate application of selected drawbacks to the game
+    - AI player control selection
     """
-    def __init__(self, width=800, height=600, board_reference=None, callback=None):
+    def __init__(self, width=800, height=600, board_reference=None, callback=None, ai_settings=None):
         self.width = width
         self.height = height
         self.board = board_reference  # Reference to the chess board
         self.callback = callback  # Callback to update the main game
+        
+        # AI control settings
+        self.ai_settings = ai_settings or {"WHITE_AI": False, "BLACK_AI": True}
         
         # Initialize Pygame if not already done
         if not p.get_init():
@@ -43,6 +47,10 @@ class TinkerPanel:
         self.white_area = p.Rect(20, 60, int(width/2) - 30, height - 80)
         self.black_area = p.Rect(int(width/2) + 10, 60, int(width/2) - 30, height - 80)
         self.close_rect = p.Rect(width/2 - 60, height - 60, 120, 40)
+        
+        # AI toggle buttons
+        self.white_ai_rect = p.Rect(40, 60, 20, 20)
+        self.black_ai_rect = p.Rect(int(width/2) + 30, 60, 20, 20)
         
         # Lists for drawback buttons
         self.white_buttons = []
@@ -162,6 +170,13 @@ class TinkerPanel:
             # Update UI
             self.populate_drawbacks_lists()
     
+    def toggle_ai(self, color):
+        """Toggle AI control for a specific player"""
+        if color == chess.WHITE:
+            self.ai_settings["WHITE_AI"] = not self.ai_settings["WHITE_AI"]
+        else:
+            self.ai_settings["BLACK_AI"] = not self.ai_settings["BLACK_AI"]
+    
     def draw(self):
         """Draw the UI"""
         # Fill background
@@ -176,12 +191,39 @@ class TinkerPanel:
         p.draw.line(self.window, (150, 150, 150), (self.width/2, 60), (self.width/2, self.height - 70), 2)
         
         # Draw white section title
-        white_title = self.normal_font.render("White Drawbacks", True, (255, 255, 255))
-        self.window.blit(white_title, (40, 60))
+        white_title = self.normal_font.render("White Drawbacks", True, (70, 60))
+        self.window.blit(white_title, (70, 60))
         
         # Draw black section title
-        black_title = self.normal_font.render("Black Drawbacks", True, (255, 255, 255))
-        self.window.blit(black_title, (int(self.width/2) + 30, 60))
+        black_title = self.normal_font.render("Black Drawbacks", True, (int(self.width/2) + 60, 60))
+        self.window.blit(black_title, (int(self.width/2) + 60, 60))
+        
+        # Draw AI checkboxes and labels
+        # White AI
+        p.draw.rect(self.window, (200, 200, 200), self.white_ai_rect)
+        if self.ai_settings["WHITE_AI"]:
+            p.draw.line(self.window, (0, 0, 0), 
+                       (self.white_ai_rect.left + 2, self.white_ai_rect.top + 2),
+                       (self.white_ai_rect.right - 2, self.white_ai_rect.bottom - 2), 2)
+            p.draw.line(self.window, (0, 0, 0), 
+                       (self.white_ai_rect.left + 2, self.white_ai_rect.bottom - 2),
+                       (self.white_ai_rect.right - 2, self.white_ai_rect.top + 2), 2)
+        
+        white_ai_label = self.small_font.render("AI Control", True, (255, 255, 255))
+        self.window.blit(white_ai_label, (self.white_ai_rect.right + 5, self.white_ai_rect.top))
+        
+        # Black AI
+        p.draw.rect(self.window, (200, 200, 200), self.black_ai_rect)
+        if self.ai_settings["BLACK_AI"]:
+            p.draw.line(self.window, (0, 0, 0), 
+                       (self.black_ai_rect.left + 2, self.black_ai_rect.top + 2),
+                       (self.black_ai_rect.right - 2, self.black_ai_rect.bottom - 2), 2)
+            p.draw.line(self.window, (0, 0, 0), 
+                       (self.black_ai_rect.left + 2, self.black_ai_rect.bottom - 2),
+                       (self.black_ai_rect.right - 2, self.black_ai_rect.top + 2), 2)
+        
+        black_ai_label = self.small_font.render("AI Control", True, (255, 255, 255))
+        self.window.blit(black_ai_label, (self.black_ai_rect.right + 5, self.black_ai_rect.top))
         
         # Draw search boxes
         p.draw.rect(self.window, (200, 200, 200), self.white_search_rect, 0 if self.active_input == 'white' else 2)
@@ -288,6 +330,15 @@ class TinkerPanel:
             self.running = False
             return
         
+        # Check if clicked on AI checkboxes
+        if self.white_ai_rect.collidepoint(x, y):
+            self.toggle_ai(chess.WHITE)
+            return
+        
+        if self.black_ai_rect.collidepoint(x, y):
+            self.toggle_ai(chess.BLACK)
+            return
+        
         # Check if clicked on white search box
         if self.white_search_rect.collidepoint(x, y):
             self.active_input = 'white'
@@ -389,4 +440,4 @@ class TinkerPanel:
         
         # Properly close only this window, not the entire application
         pygame_window = p.display.get_surface()
-        return (self.selected_white_drawback, self.selected_black_drawback)
+        return (self.selected_white_drawback, self.selected_black_drawback, self.ai_settings)

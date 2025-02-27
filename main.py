@@ -28,8 +28,16 @@ SQ_SIZE = HEIGHT // DIMENSION
 FPS = 12
 AI_DEPTH = 3  # Adjust AI search depth (higher = stronger)
 
-WHITE_AI = False  # Set to True if you want White to be controlled by AI
-BLACK_AI = True   # Set to True if you want Black to be controlled by AI
+# Global variables
+game_over = False
+winner_color = None
+# AI control flags - will be updated from the Tinker Panel
+WHITE_AI = False
+BLACK_AI = True
+
+# UI elements for AI control in main game
+white_ai_checkbox = p.Rect(10, HEIGHT - 25, 15, 15)
+black_ai_checkbox = p.Rect(WIDTH - 80, HEIGHT - 25, 15, 15)
 
 # List of available drawbacks
 AVAILABLE_DRAWBACKS = [
@@ -81,11 +89,75 @@ def display_winner(screen, winner_color):
     screen.blit(text_surf, text_rect)
     p.display.flip()
 
+def display_ai_status(screen):
+    """Display which sides are controlled by AI with checkboxes"""
+    font = p.font.SysFont(None, 20)
+    
+    # Draw white AI checkbox and label
+    p.draw.rect(screen, (255, 255, 255), white_ai_checkbox)
+    if WHITE_AI:
+        # Draw X in checkbox when AI is on
+        p.draw.line(screen, (0, 0, 0), 
+                   (white_ai_checkbox.left + 2, white_ai_checkbox.top + 2),
+                   (white_ai_checkbox.right - 2, white_ai_checkbox.bottom - 2), 2)
+        p.draw.line(screen, (0, 0, 0), 
+                   (white_ai_checkbox.left + 2, white_ai_checkbox.bottom - 2),
+                   (white_ai_checkbox.right - 2, white_ai_checkbox.top + 2), 2)
+    
+    white_text = font.render("White AI", True, p.Color("white"))
+    screen.blit(white_text, (white_ai_checkbox.right + 5, white_ai_checkbox.top))
+    
+    # Draw black AI checkbox and label
+    p.draw.rect(screen, (255, 255, 255), black_ai_checkbox)
+    if BLACK_AI:
+        # Draw X in checkbox when AI is on
+        p.draw.line(screen, (0, 0, 0), 
+                   (black_ai_checkbox.left + 2, black_ai_checkbox.top + 2),
+                   (black_ai_checkbox.right - 2, black_ai_checkbox.bottom - 2), 2)
+        p.draw.line(screen, (0, 0, 0), 
+                   (black_ai_checkbox.left + 2, black_ai_checkbox.bottom - 2),
+                   (black_ai_checkbox.right - 2, black_ai_checkbox.top + 2), 2)
+    
+    black_text = font.render("Black AI", True, p.Color("white"))
+    screen.blit(black_text, (black_ai_checkbox.right + 5, black_ai_checkbox.top))
+
+def check_ai_checkbox_click(pos):
+    """Check if an AI checkbox was clicked and toggle it"""
+    global WHITE_AI, BLACK_AI
+    x, y = pos
+    
+    if white_ai_checkbox.collidepoint(x, y):
+        WHITE_AI = not WHITE_AI
+        print(f"White AI toggled: {'ON' if WHITE_AI else 'OFF'}")
+        return True
+    
+    if black_ai_checkbox.collidepoint(x, y):
+        BLACK_AI = not BLACK_AI
+        print(f"Black AI toggled: {'ON' if BLACK_AI else 'OFF'}")
+        return True
+    
+    return False
+
 def open_tinker_panel(board):
-    """Open the Tinker's Control Panel to modify drawbacks"""
+    """Open the Tinker's Control Panel to modify drawbacks and AI settings"""
+    global WHITE_AI, BLACK_AI
+    
     if HAS_TINKER_PANEL:
-        tinker_panel = TinkerPanel(board_reference=board)
-        white_drawback, black_drawback = tinker_panel.run()
+        # Pass current AI settings to the panel
+        ai_settings = {
+            "WHITE_AI": WHITE_AI,
+            "BLACK_AI": BLACK_AI
+        }
+        
+        tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
+        result = tinker_panel.run()
+        
+        if result:
+            white_drawback, black_drawback, updated_ai_settings = result
+            
+            # Update AI control flags
+            WHITE_AI = updated_ai_settings["WHITE_AI"]
+            BLACK_AI = updated_ai_settings["BLACK_AI"]
         
         # Reinitialize the main screen
         p.display.set_mode((WIDTH, HEIGHT))
@@ -140,7 +212,9 @@ def display_help(screen):
         "F: Flip Board",
         "T: Open Tinker Panel",
         "1: Random White Drawback",
-        "2: Random Black Drawback",
+        "2: Random Black Drawback", 
+        "W: Toggle White AI",
+        "B: Toggle Black AI",
         "H: Toggle Help"
     ]
     
@@ -150,6 +224,8 @@ def display_help(screen):
 
 def main():
     """Main game loop for Drawback Chess."""
+    global game_over, winner_color, WHITE_AI, BLACK_AI
+    
     p.init()
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
@@ -176,7 +252,6 @@ def main():
         print(f"{8-r} {rank_str}")
     print("  a b c d e f g h")
 
-    global game_over, winner_color
     running = True
 
     # Default orientation: White on bottom, Black on top
@@ -192,55 +267,62 @@ def main():
             if event.type == p.QUIT:
                 running = False
 
-            elif event.type == p.MOUSEBUTTONDOWN and not game_over:
-                # Only allow user input if the current side is not AI
-                if not (WHITE_AI and board.turn == chess.WHITE) and not (BLACK_AI and board.turn == chess.BLACK):
-                    x, y = event.pos
-                    row, col = y // SQ_SIZE, x // SQ_SIZE
+            elif event.type == p.MOUSEBUTTONDOWN:
+                x, y = event.pos
+                
+                # First check if an AI checkbox was clicked
+                if check_ai_checkbox_click((x, y)):
+                    continue
+                
+                # Then handle game moves if not in game over state
+                if not game_over:
+                    # Only allow user input if the current side is not AI
+                    if not (WHITE_AI and board.turn == chess.WHITE) and not (BLACK_AI and board.turn == chess.BLACK):
+                        row, col = y // SQ_SIZE, x // SQ_SIZE
 
-                    # Convert screen coordinates to board coordinates
-                    if flipped:
-                        board_row = row 
-                        board_col = 7 - col
-                    else:
-                        board_row = 7 - row
-                        board_col = col
-
-                    clicked_square = chess.square(board_col, board_row)  # file, rank
-
-                    if selected_square is None:
-                        piece = board.piece_at(clicked_square)
-                        if piece and piece.color == board.turn:
-                            selected_square = clicked_square
-                            print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
-                    else:
-                        move = chess.Move(selected_square, clicked_square)
-                        
-                        # Check if this move captures a king
-                        target = board.piece_at(clicked_square)
-                        is_king_capture = target and target.piece_type == chess.KING
-                        
-                        if board.is_legal(move):
-                            if is_king_capture:
-                                print(f"Capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
-                                
-                            print(f"Moving {board.piece_at(selected_square).symbol()} from {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
-                            board.push(move)
-                            selected_square = None
-                            
-                            # Check if the move resulted in a king capture (game over)
-                            if board.is_variant_end():
-                                winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                                game_over = True
+                        # Convert screen coordinates to board coordinates
+                        if flipped:
+                            board_row = row 
+                            board_col = 7 - col
                         else:
-                            # Check if clicked on another piece of same color
+                            board_row = 7 - row
+                            board_col = col
+
+                        clicked_square = chess.square(board_col, board_row)  # file, rank
+
+                        if selected_square is None:
                             piece = board.piece_at(clicked_square)
                             if piece and piece.color == board.turn:
                                 selected_square = clicked_square
                                 print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
-                            else:
-                                print(f"Illegal move: {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                        else:
+                            move = chess.Move(selected_square, clicked_square)
+                            
+                            # Check if this move captures a king
+                            target = board.piece_at(clicked_square)
+                            is_king_capture = target and target.piece_type == chess.KING
+                            
+                            if board.is_legal(move):
+                                if is_king_capture:
+                                    print(f"Capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
+                                    
+                                print(f"Moving {board.piece_at(selected_square).symbol()} from {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                                board.push(move)
                                 selected_square = None
+                                
+                                # Check if the move resulted in a king capture (game over)
+                                if board.is_variant_end():
+                                    winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
+                                    game_over = True
+                            else:
+                                # Check if clicked on another piece of same color
+                                piece = board.piece_at(clicked_square)
+                                if piece and piece.color == board.turn:
+                                    selected_square = clicked_square
+                                    print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
+                                else:
+                                    print(f"Illegal move: {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                                    selected_square = None
 
             elif event.type == p.KEYDOWN:
                 if event.key == p.K_f:
@@ -270,6 +352,14 @@ def main():
                 elif event.key == p.K_h:
                     # Toggle help display
                     show_help = not show_help
+                elif event.key == p.K_w:
+                    # Toggle White AI
+                    WHITE_AI = not WHITE_AI
+                    print(f"White AI: {'ON' if WHITE_AI else 'OFF'}")
+                elif event.key == p.K_b:
+                    # Toggle Black AI
+                    BLACK_AI = not BLACK_AI
+                    print(f"Black AI: {'ON' if BLACK_AI else 'OFF'}")
 
         if not game_over:
             # Let AI move if it's AI's turn
@@ -336,6 +426,9 @@ def main():
         # Display help if enabled
         if show_help:
             display_help(screen)
+        
+        # Display AI status
+        display_ai_status(screen)
 
         clock.tick(FPS)
         p.display.flip()
