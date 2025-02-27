@@ -11,7 +11,7 @@ class Score(Enum):
     BISHOP = np.int32(300)
     ROOK = np.int32(500)
     QUEEN = np.int32(900)
-    KING = np.int32(10000)  # High value to make AI prioritize king safety
+    KING = np.int32(20000)  # Extremely high value to make king capture an absolute priority
     CHECKMATE = np.int32(100000)  # Winning state
     MOVE = np.int32(5)  # Mobility bonus
 
@@ -21,18 +21,25 @@ PIECE_VALUES = {
     chess.BISHOP: 330,
     chess.ROOK: 500,
     chess.QUEEN: 900,
-    chess.KING: 10000  # King value is very high because capturing the king ends the game
+    chess.KING: 20000  # Making king worth much more to prioritize its capture
 }
 
 def evaluate_board(board):
     """
     Evaluates the board position.
     """
-    if board.is_variant_win():
-        return float('inf') if board.turn == chess.WHITE else float('-inf')
-    if board.is_variant_loss():
-        return float('-inf') if board.turn == chess.WHITE else float('inf')
+    # Check for king capture (immediate win/loss situation)
+    white_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.WHITE 
+                          for piece in board.piece_map().values())
+    black_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.BLACK 
+                          for piece in board.piece_map().values())
+    
+    if not black_king_alive:
+        return float('inf')  # White wins by capturing the Black king
+    if not white_king_alive:
+        return float('-inf')  # Black wins by capturing the White king
 
+    # Continue with normal evaluation if both kings are alive
     material = sum(PIECE_VALUES[piece.piece_type] * (1 if piece.color == chess.WHITE else -1)
                    for piece in board.piece_map().values())
     return material
@@ -51,9 +58,9 @@ def evaluate(board):
     black_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.BLACK for piece in board.piece_map().values())
 
     if not black_king_alive:  # White wins by capturing the Black king
-        return Score.CHECKMATE.value
+        return Score.CHECKMATE.value  # Maximum positive score
     if not white_king_alive:  # Black wins by capturing the White king
-        return -Score.CHECKMATE.value
+        return -Score.CHECKMATE.value  # Maximum negative score
 
     # If the player has no legal moves, they lose
     if board.is_variant_loss():
@@ -66,6 +73,7 @@ def get_piece_value(board, piece_type, color):
     Returns the value of a piece, modified by drawbacks if applicable.
     - If a drawback removes a piece's ability (e.g., "no_knight_moves"), its value becomes 0.
     - Otherwise, it keeps its normal value.
+    - Kings always retain their high value.
     """
     active_drawback = board.get_active_drawback(color)
     base_values = {
@@ -74,10 +82,14 @@ def get_piece_value(board, piece_type, color):
         chess.BISHOP: Score.BISHOP.value,
         chess.ROOK: Score.ROOK.value,
         chess.QUEEN: Score.QUEEN.value,
-        chess.KING: Score.KING.value  # King should be prioritized
+        chess.KING: Score.KING.value  # King should have high value
     }
 
-    # Apply drawback modification
+    # Special case for kings - always keep them valuable
+    if piece_type == chess.KING:
+        return base_values[chess.KING]
+
+    # Apply drawback modification for other pieces
     if active_drawback:
         drawback_info = get_drawback_info(active_drawback)
         if drawback_info and "piece_value_override" in drawback_info:

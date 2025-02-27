@@ -2,6 +2,7 @@
 import chess
 from GameState.drawback_manager import get_drawback_info
 
+# Correct standard FEN with the king and queen in their proper places
 defaultfen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 class DrawbackBoard(chess.Board):

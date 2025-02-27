@@ -60,12 +60,28 @@ def main():
     board = DrawbackBoard()
     assign_drawbacks(board)
     board.reset()
+    
+    # Print the FEN for debugging
+    print(f"Starting position FEN: {board.fen()}")
+    
+    # Debug the initial board state
+    for r in range(8):
+        rank_str = ""
+        for f in range(8):
+            sq = chess.square(f, r)  # file (0-7), rank (0-7)
+            piece = board.piece_at(sq)
+            if piece:
+                rank_str += piece.symbol() + " "
+            else:
+                rank_str += "· "
+        print(f"{8-r} {rank_str}")
+    print("  a b c d e f g h")
 
     global game_over, winner_color
     running = True
 
     # IMPORTANT: flipped = False means White on bottom by default
-    flipped = True
+    flipped = False  # Start with White on bottom
 
     selected_square = None
     game_over = False
@@ -82,28 +98,41 @@ def main():
                     x, y = event.pos
                     row, col = y // SQ_SIZE, x // SQ_SIZE
 
-                    # INVERT the flipping logic:
-                    # if flipped is True => invert row, col => Black on bottom
+                    # Convert screen coordinates to board coordinates
                     if flipped:
-                        row, col = 7 - row, 7 - col
+                        board_row = row 
+                        board_col = 7 - col
+                    else:
+                        board_row = 7 - row
+                        board_col = col
 
-                    clicked_square = row * 8 + col
+                    clicked_square = chess.square(board_col, board_row)  # file, rank
 
                     if selected_square is None:
-                        if board.piece_at(clicked_square) and board.color_at(clicked_square) == board.turn:
-                            selected_square = (row, col)
+                        piece = board.piece_at(clicked_square)
+                        if piece and piece.color == board.turn:
+                            selected_square = clicked_square
+                            print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
                     else:
-                        move_coords = (selected_square, (row, col))
-                        new_selected_square = apply_legal_move(board, move_coords, selected_square)
-                        selected_square = new_selected_square
-
-                        draw_board(screen, DIMENSION, WIDTH, HEIGHT, flipped)
-                        draw_pieces(screen, board, flipped, DIMENSION)
-                        p.display.flip()
-
-                        if board.is_variant_end():
-                            winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                            game_over = True
+                        move = chess.Move(selected_square, clicked_square)
+                        if board.is_legal(move):
+                            print(f"Moving {board.piece_at(selected_square).symbol()} from {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                            board.push(move)
+                            selected_square = None
+                            
+                            # Check if the move resulted in a win
+                            if board.is_variant_end():
+                                winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
+                                game_over = True
+                        else:
+                            # Check if clicked on another piece of same color
+                            piece = board.piece_at(clicked_square)
+                            if piece and piece.color == board.turn:
+                                selected_square = clicked_square
+                                print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
+                            else:
+                                print(f"Illegal move: {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                                selected_square = None
 
             elif event.type == p.KEYDOWN:
                 if event.key == p.K_f:
@@ -130,9 +159,46 @@ def main():
                 ai_move(board)
 
         draw_board(screen, DIMENSION, WIDTH, HEIGHT, flipped)
-        if selected_square is not None:
-            draw_highlights(screen, board, selected_square, flipped)
         draw_pieces(screen, board, flipped, DIMENSION)
+        
+        # Highlight the selected square
+        if selected_square is not None:
+            row = chess.square_rank(selected_square)
+            col = chess.square_file(selected_square)
+            if flipped:
+                draw_row = row
+                draw_col = 7 - col
+            else:
+                draw_row = 7 - row
+                draw_col = col
+                
+            highlight_surf = p.Surface((SQ_SIZE, SQ_SIZE), p.SRCALPHA)
+            highlight_surf.fill((255, 255, 0, 100))
+            screen.blit(highlight_surf, (draw_col * SQ_SIZE, draw_row * SQ_SIZE))
+            
+            # Also highlight legal moves
+            for move in board.legal_moves:
+                if move.from_square == selected_square:
+                    to_row = chess.square_rank(move.to_square)
+                    to_col = chess.square_file(move.to_square)
+                    
+                    if flipped:
+                        to_draw_row = to_row
+                        to_draw_col = 7 - to_col
+                    else:
+                        to_draw_row = 7 - to_row
+                        to_draw_col = to_col
+                    
+                    # Draw a circle for the legal move
+                    circle_surface = p.Surface((SQ_SIZE, SQ_SIZE), p.SRCALPHA)
+                    is_capture = board.piece_at(move.to_square) is not None
+                    if is_capture:
+                        p.draw.circle(circle_surface, (0, 0, 0, 120), 
+                                    (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 2, 7)
+                    else:
+                        p.draw.circle(circle_surface, (0, 0, 0, 120), 
+                                    (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 7)
+                    screen.blit(circle_surface, (to_draw_col * SQ_SIZE, to_draw_row * SQ_SIZE))
 
         if game_over and winner_color is not None:
             display_winner(screen, winner_color)

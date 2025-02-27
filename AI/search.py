@@ -56,7 +56,7 @@ def negamax(board, depth, alpha, beta):
 
     return max_score
 
-def best_move(board, depth):
+def best_move(board, depth) -> int:
     """
     Determines the best move using Negamax with alpha-beta and basic move-ordering.
     """

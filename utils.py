@@ -34,7 +34,7 @@ def draw_board(screen, dimension=8, width=680, height=680, flipped=False):
             color = white if (row + col) % 2 == 0 else dark
             p.draw.rect(screen, color, p.Rect(col * sq_size, row * sq_size, sq_size, sq_size))
             if flipped:
-                coord_text = font.render(f"{chr(97 + (7 - col))}{8 - row}", True, p.Color("black"))
+                coord_text = font.render(f"{chr(97 + (7 - col))}{row + 1}", True, p.Color("black"))
             else:
                 coord_text = font.render(f"{chr(97 + col)}{8 - row}", True, p.Color("black"))
             screen.blit(coord_text, (col * sq_size + sq_size - 20, row * sq_size + sq_size - 20))
@@ -46,20 +46,23 @@ def draw_pieces(screen, board_obj, flipped=False, dimension=8):
     If flipped=True => black on bottom, white on top.
     """
     sq_size = 680 // dimension
+    # Debug to verify squares and piece positions
     for sq in chess.SQUARES:
         piece = board_obj.piece_at(sq)
         if piece:
-            row = sq // 8
-            col = sq % 8
+            # Get the correct position based on the square
+            row = chess.square_rank(sq)  # 0-7, bottom to top (a1 is rank 0, a8 is rank 7)
+            col = chess.square_file(sq)  # 0-7, left to right (a1 is file 0, h1 is file 7)
 
-            # If flipped => invert row,col
+            # Adjust drawing position based on board orientation
             if flipped:
-                draw_row = 7 - row
-                draw_col = 7 - col
+                draw_row = row  # In flipped orientation, rank 0 (bottom) goes at the top
+                draw_col = 7 - col  # In flipped orientation, file 0 (left) goes at the right
             else:
-                draw_row = row
-                draw_col = col
+                draw_row = 7 - row  # In normal orientation, rank 0 (bottom) goes at the bottom
+                draw_col = col  # In normal orientation, file 0 (left) goes at the left
 
+            # Get the corresponding image
             color_char = 'w' if piece.color == chess.WHITE else 'b'
             piece_type = piece.symbol().upper()
             image_key = color_char + piece_type
@@ -68,6 +71,7 @@ def draw_pieces(screen, board_obj, flipped=False, dimension=8):
                 print(f"Warning: Missing image for {image_key}")
                 continue
 
+            # Draw the piece
             screen.blit(IMAGES[image_key], (draw_col * sq_size, draw_row * sq_size))
 
 def apply_legal_move(board_obj, move, selected_square):
