@@ -15,6 +15,7 @@ class Score(Enum):
     CHECKMATE = np.int32(100000)  # Winning state
     MOVE = np.int32(5)  # Mobility bonus
 
+# Standard piece values
 PIECE_VALUES = {
     chess.PAWN: 100,
     chess.KNIGHT: 320,
@@ -26,7 +27,7 @@ PIECE_VALUES = {
 
 def evaluate_board(board):
     """
-    Evaluates the board position.
+    Evaluates the board position based on material and drawbacks.
     """
     # Check for king capture (immediate win/loss situation)
     white_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.WHITE 
@@ -40,8 +41,20 @@ def evaluate_board(board):
         return float('-inf')  # Black wins by capturing the White king
 
     # Continue with normal evaluation if both kings are alive
-    material = sum(PIECE_VALUES[piece.piece_type] * (1 if piece.color == chess.WHITE else -1)
-                   for piece in board.piece_map().values())
+    material = 0
+    
+    # Calculate material for each piece, taking drawbacks into account
+    for square, piece in board.piece_map().items():
+        value = get_piece_value(board, piece.piece_type, piece.color)
+        if piece.color == chess.WHITE:
+            material += value
+        else:
+            material -= value
+            
+    # Adjust for whose turn it is
+    if board.turn == chess.BLACK:
+        material = -material
+        
     return material
 
 def evaluate(board):
@@ -66,24 +79,16 @@ def evaluate(board):
     if board.is_variant_loss():
         return -Score.CHECKMATE.value
 
-    return eval_pieces(board) + eval_moves(board) + eval_positional(board)
+    return eval_pieces(board) + eval_moves(board) + eval_positional(board) + eval_drawback_specific(board)
 
 def get_piece_value(board, piece_type, color):
     """
     Returns the value of a piece, modified by drawbacks if applicable.
-    - If a drawback removes a piece's ability (e.g., "no_knight_moves"), its value becomes 0.
-    - Otherwise, it keeps its normal value.
-    - Kings always retain their high value.
+    - If a drawback affects a piece's value, use the drawback's override
+    - Otherwise, use the standard value
     """
     active_drawback = board.get_active_drawback(color)
-    base_values = {
-        chess.PAWN: Score.PAWN.value,
-        chess.KNIGHT: Score.KNIGHT.value,
-        chess.BISHOP: Score.BISHOP.value,
-        chess.ROOK: Score.ROOK.value,
-        chess.QUEEN: Score.QUEEN.value,
-        chess.KING: Score.KING.value  # King should have high value
-    }
+    base_values = PIECE_VALUES.copy()
 
     # Special case for kings - always keep them valuable
     if piece_type == chess.KING:
@@ -93,7 +98,9 @@ def get_piece_value(board, piece_type, color):
     if active_drawback:
         drawback_info = get_drawback_info(active_drawback)
         if drawback_info and "piece_value_override" in drawback_info:
-            return drawback_info["piece_value_override"].get(piece_type, base_values.get(piece_type, 0))
+            override_value = drawback_info["piece_value_override"].get(piece_type)
+            if override_value is not None:
+                return override_value
 
     return base_values.get(piece_type, 0)
 
@@ -121,12 +128,14 @@ def eval_pieces(board):
 def eval_moves(board):
     """
     Evaluates mobility. More legal moves = better position.
-    - If the player has no moves, they lose.
+    - If the player has no moves and the king is in danger, they're likely to lose soon
     """
     num_moves = len(list(board.legal_moves))  # Uses drawback-aware move generation
 
     if num_moves == 0:
-        return -Score.CHECKMATE.value  # Losing position
+        # In Drawback Chess, having no moves isn't an immediate loss,
+        # but it's still very bad
+        return -Score.CHECKMATE.value // 2  
 
     return Score.MOVE.value * np.int32(num_moves)
 
@@ -139,6 +148,9 @@ def eval_positional(board):
     score = 0
     active_drawback = board.get_active_drawback(board.turn)
 
+    # Center control bonus
+    central_squares = [chess.D4, chess.D5, chess.E4, chess.E5]
+    
     for square, piece in board.piece_map().items():
         piece_value = get_piece_value(board, piece.piece_type, piece.color)
 
@@ -147,17 +159,58 @@ def eval_positional(board):
             continue
 
         # Default positional bonus (encourage center control)
-        positional_value = 5 if square in [chess.D4, chess.D5, chess.E4, chess.E5] else 0
-
-        # Check if drawback overrides positional values
-        if active_drawback:
-            drawback_info = get_drawback_info(active_drawback)
-            if drawback_info and "positional_override" in drawback_info:
-                override_table = drawback_info["positional_override"].get(piece.piece_type)
-                if override_table:
-                    positional_value = override_table.get(square, 0)
+        positional_value = 5 if square in central_squares else 0
 
         # Adjust score based on piece color
         score += positional_value if piece.color == board.turn else -positional_value
 
+    return score
+
+def eval_drawback_specific(board):
+    """
+    Apply specific evaluation bonuses/penalties based on the active drawbacks.
+    """
+    score = 0
+    
+    # Get drawbacks for both players
+    white_drawback = board.get_active_drawback(chess.WHITE)
+    black_drawback = board.get_active_drawback(chess.BLACK)
+    
+    # Check for strategic advantages based on drawbacks
+    if board.turn == chess.WHITE:
+        # White is playing
+        
+        # If White has no knight moves, encourage pawn advancement and bishop development
+        if white_drawback == "no_knight_moves":
+            # Count advanced pawns and developed bishops
+            for square, piece in board.piece_map().items():
+                if piece.color == chess.WHITE:
+                    rank = chess.square_rank(square)
+                    if piece.piece_type == chess.PAWN and rank >= 3:  # Pawn advanced to rank 4 or beyond
+                        score += 5
+                    elif piece.piece_type == chess.BISHOP and rank >= 2:  # Bishop developed
+                        score += 10
+        
+        # If Black can't capture with knights or bishops, that's an advantage for White
+        if black_drawback in ["no_knight_captures", "no_bishop_captures"]:
+            score += 15  # Generic bonus for opponent's capture restriction
+            
+    else:
+        # Black is playing
+        
+        # If Black has no knight moves, encourage pawn advancement and bishop development
+        if black_drawback == "no_knight_moves":
+            # Count advanced pawns and developed bishops
+            for square, piece in board.piece_map().items():
+                if piece.color == chess.BLACK:
+                    rank = chess.square_rank(square)
+                    if piece.piece_type == chess.PAWN and rank <= 4:  # Pawn advanced to rank 5 or beyond
+                        score += 5
+                    elif piece.piece_type == chess.BISHOP and rank <= 5:  # Bishop developed
+                        score += 10
+        
+        # If White can't capture with knights or bishops, that's an advantage for Black
+        if white_drawback in ["no_knight_captures", "no_bishop_captures"]:
+            score += 15  # Generic bonus for opponent's capture restriction
+    
     return score

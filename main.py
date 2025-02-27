@@ -17,10 +17,45 @@ AI_DEPTH = 3  # Adjust AI search depth (higher = stronger)
 WHITE_AI = False  # Set to True if you want White to be controlled by AI
 BLACK_AI = True   # Set to True if you want Black to be controlled by AI
 
-def assign_drawbacks(board):
-    board.set_drawback(chess.WHITE, "no_knight_moves")
-    board.set_drawback(chess.BLACK, "no_knight_moves")
-    print("Drawbacks: no_knight_moves assigned to both players.")
+# List of available drawbacks
+AVAILABLE_DRAWBACKS = [
+    "no_knight_moves",
+    "no_bishop_captures",
+    "no_knight_captures"
+]
+
+def assign_random_drawbacks(board):
+    """Assign random drawbacks to each player."""
+    # Choose random drawbacks for each player
+    white_drawback = random.choice(AVAILABLE_DRAWBACKS)
+    black_drawback = random.choice(AVAILABLE_DRAWBACKS)
+    
+    # Assign the drawbacks
+    board.set_drawback(chess.WHITE, white_drawback)
+    board.set_drawback(chess.BLACK, black_drawback)
+    
+    print(f"White drawback: {white_drawback}")
+    print(f"Black drawback: {black_drawback}")
+
+def display_drawbacks(screen, board):
+    """Display the active drawbacks for each player at the top of the screen."""
+    font = p.font.SysFont(None, 24)
+    
+    # Get drawback names
+    white_drawback = board.get_active_drawback(chess.WHITE) or "None"
+    black_drawback = board.get_active_drawback(chess.BLACK) or "None"
+    
+    # Format drawback names for display
+    white_drawback_name = white_drawback.replace("_", " ").title()
+    black_drawback_name = black_drawback.replace("_", " ").title()
+    
+    # Create text surfaces
+    white_text = font.render(f"White: {white_drawback_name}", True, p.Color("white"), p.Color("black"))
+    black_text = font.render(f"Black: {black_drawback_name}", True, p.Color("black"), p.Color("white"))
+    
+    # Place text at top of screen
+    screen.blit(white_text, (10, 5))
+    screen.blit(black_text, (WIDTH - black_text.get_width() - 10, 5))
 
 def display_winner(screen, winner_color):
     """Display the winner and stop the game."""
@@ -54,6 +89,18 @@ def ai_move(board):
         else:
             print("AI has no legal moves!")
 
+def change_drawback(board, color, new_drawback=None):
+    """
+    Change the drawback for a specific player.
+    If no drawback is specified, choose randomly.
+    """
+    if new_drawback is None:
+        new_drawback = random.choice(AVAILABLE_DRAWBACKS)
+    
+    board.set_drawback(color, new_drawback)
+    color_name = "White" if color == chess.WHITE else "Black"
+    print(f"Changed {color_name}'s drawback to: {new_drawback}")
+
 def main():
     """Main game loop for Drawback Chess."""
     p.init()
@@ -63,7 +110,7 @@ def main():
 
     load_images()
     board = DrawbackBoard()
-    assign_drawbacks(board)
+    assign_random_drawbacks(board)  # Assign random drawbacks to each player
     board.reset()
     
     # Print the FEN for debugging
@@ -155,7 +202,7 @@ def main():
                 elif event.key == p.K_r:
                     # Reset board and game state properly
                     board = DrawbackBoard()
-                    assign_drawbacks(board)
+                    assign_random_drawbacks(board)
                     board.reset()
 
                     selected_square = None
@@ -163,6 +210,12 @@ def main():
                     winner_color = None
 
                     print("Game restarted!")
+                elif event.key == p.K_1:
+                    # Change White's drawback
+                    change_drawback(board, chess.WHITE)
+                elif event.key == p.K_2:
+                    # Change Black's drawback
+                    change_drawback(board, chess.BLACK)
 
         if not game_over:
             # Let AI move if it's AI's turn
@@ -173,6 +226,9 @@ def main():
 
         draw_board(screen, DIMENSION, WIDTH, HEIGHT, flipped)
         draw_pieces(screen, board, flipped, DIMENSION)
+        
+        # Display active drawbacks
+        display_drawbacks(screen, board)
         
         # Highlight the selected square
         if selected_square is not None:
