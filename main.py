@@ -240,11 +240,19 @@ def ai_move(board):
                     game_over = True
                     winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
                     print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
+                
+                # Return here to prevent immediately starting another search
+                return
             else:
                 # Move is no longer valid
                 print("AI found move is no longer valid - resetting")
                 reset_ai_state()
         # If search is not complete, just continue waiting
+        return
+    
+    # Respect cooldown timer to prevent immediate AI move after making a move
+    if ai_move_cooldown > 0:
+        ai_move_cooldown -= 1
         return
     
     # Start a new AI search if it's AI's turn and not already thinking
