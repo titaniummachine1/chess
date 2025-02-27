@@ -2,11 +2,17 @@
 import pygame as p
 import chess
 import random
-from utils import load_images, draw_board, draw_pieces, apply_legal_move, draw_highlights
+from utils import (load_images, draw_board, draw_pieces, apply_legal_move, 
+                   draw_highlights, draw_legal_move_indicators)
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
 
-# Try to import the TinkerPanel, but don't fail if pygame_gui is missing
+# Add BOARD_HEIGHT to utils.py's global scope for square size calculation
+import utils
+BOARD_HEIGHT = 640  # Actual board height
+utils.BOARD_HEIGHT = BOARD_HEIGHT
+
+# Rest of imports
 try:
     from ui.tinker_panel import TinkerPanel
     HAS_TINKER_PANEL = True
@@ -22,37 +28,38 @@ except ImportError:
     HAS_AI = False
 
 # Game Settings
-WIDTH, HEIGHT = 680, 680
-BOARD_HEIGHT = 600  # Actual board height
-BOARD_Y_OFFSET = 40  # Space at the top for white text
+WIDTH = 800  # Wider to accommodate centered board with coordinates
+HEIGHT = 760  # Taller to accommodate info bars
+BOARD_HEIGHT = 640  # Actual board height
+BOARD_Y_OFFSET = 80  # Space at the top for white info
+BOARD_X_OFFSET = 80  # Space at the left for board centering
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
 FPS = 12
 AI_DEPTH = 3  # Adjust AI search depth (higher = stronger)
-AI_SPEED_DELAY = 0.3  # Default delay in seconds between AI moves
+
+# Important: Set the BOARD_HEIGHT in utils for consistent square sizing
+import utils
+utils.BOARD_HEIGHT = BOARD_HEIGHT
 
 # Global variables
 game_over = False
 winner_color = None
+flipped = False  # Make flipped global to be accessible in open_tinker_panel
+
 # AI control flags - will be updated from the Tinker Panel
 WHITE_AI = False
 BLACK_AI = True
 
-# UI elements for AI control in main game
-white_ai_rect = p.Rect(10, 10, 15, 15)
-black_ai_rect = p.Rect(WIDTH - 80, HEIGHT - 30, 15, 15)
-
-# Button rects
-tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 25)
-restart_button_rect = p.Rect(WIDTH - 230, 10, 100, 25)
-flip_button_rect = p.Rect(10, HEIGHT - 30, 60, 25)
+# Button rect for Tinker Panel
+tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
 
 # List of available drawbacks
 AVAILABLE_DRAWBACKS = [
     "no_knight_moves",
     "no_bishop_captures",
     "no_knight_captures",
-    "punching_down"  # Added the new drawback
+    "punching_down"
 ]
 
 def assign_random_drawbacks(board):
@@ -68,9 +75,9 @@ def assign_random_drawbacks(board):
     print(f"White drawback: {white_drawback}")
     print(f"Black drawback: {black_drawback}")
 
-def display_drawbacks(screen, board):
-    """Display the active drawbacks for each player at the top of the screen."""
-    font = p.font.SysFont(None, 24)
+def display_drawbacks(screen, board, flipped):
+    """Display the active drawbacks for each player at the top and bottom of the screen."""
+    font = p.font.SysFont(None, 22)
     
     # Get drawback names
     white_drawback = board.get_active_drawback(chess.WHITE) or "None"
@@ -84,9 +91,25 @@ def display_drawbacks(screen, board):
     white_text = font.render(f"White: {white_drawback_name}", True, p.Color("white"), p.Color("black"))
     black_text = font.render(f"Black: {black_drawback_name}", True, p.Color("black"), p.Color("white"))
     
-    # Place text at top of screen
-    screen.blit(white_text, (10, 5))
-    screen.blit(black_text, (WIDTH - black_text.get_width() - 10, 5))
+    # If flipped, swap top/bottom positions
+    if flipped:
+        # White at bottom, Black at top
+        screen.blit(black_text, (10, 10))
+        screen.blit(white_text, (10, HEIGHT - 30))
+    else:
+        # White at top, Black at bottom
+        screen.blit(white_text, (10, 10))
+        screen.blit(black_text, (10, HEIGHT - 30))
+
+def display_current_turn(screen, board):
+    """Display whose turn it is."""
+    font = p.font.SysFont(None, 22)
+    turn_text = "White's Turn" if board.turn == chess.WHITE else "Black's Turn"
+    color = p.Color("white") if board.turn == chess.WHITE else p.Color("black")
+    bg_color = p.Color("black") if board.turn == chess.WHITE else p.Color("white")
+    
+    text_surf = font.render(turn_text, True, color, bg_color)
+    screen.blit(text_surf, (WIDTH // 2 - text_surf.get_width() // 2, 10))
 
 def display_winner(screen, winner_color):
     """Display the winner and stop the game."""
@@ -97,54 +120,13 @@ def display_winner(screen, winner_color):
     screen.blit(text_surf, text_rect)
     p.display.flip()
 
-def display_ai_status(screen):
-    """Display which sides are controlled by AI with checkboxes"""
-    font = p.font.SysFont(None, 20)
-    
-    # Draw white AI checkbox and label
-    p.draw.rect(screen, (255, 255, 255), white_ai_rect)
-    if WHITE_AI:
-        # Draw X in checkbox when AI is on
-        p.draw.line(screen, (0, 0, 0), 
-                   (white_ai_rect.left + 2, white_ai_rect.top + 2),
-                   (white_ai_rect.right - 2, white_ai_rect.bottom - 2), 2)
-        p.draw.line(screen, (0, 0, 0), 
-                   (white_ai_rect.left + 2, white_ai_rect.bottom - 2),
-                   (white_ai_rect.right - 2, white_ai_rect.top + 2), 2)
-    
-    white_text = font.render("White AI", True, p.Color("white"))
-    screen.blit(white_text, (white_ai_rect.right + 5, white_ai_rect.top))
-    
-    # Draw black AI checkbox and label
-    p.draw.rect(screen, (255, 255, 255), black_ai_rect)
-    if BLACK_AI:
-        # Draw X in checkbox when AI is on
-        p.draw.line(screen, (0, 0, 0), 
-                   (black_ai_rect.left + 2, black_ai_rect.top + 2),
-                   (black_ai_rect.right - 2, black_ai_rect.bottom - 2), 2)
-        p.draw.line(screen, (0, 0, 0), 
-                   (black_ai_rect.left + 2, black_ai_rect.bottom - 2),
-                   (black_ai_rect.right - 2, black_ai_rect.top + 2), 2)
-    
-    black_text = font.render("Black AI", True, p.Color("white"))
-    screen.blit(black_text, (black_ai_rect.right + 5, black_ai_rect.top))
-
-def check_ai_checkbox_click(pos):
-    """Check if an AI checkbox was clicked and toggle it"""
-    global WHITE_AI, BLACK_AI
-    x, y = pos
-    
-    if white_ai_rect.collidepoint(x, y):
-        WHITE_AI = not WHITE_AI
-        print(f"White AI toggled: {'ON' if WHITE_AI else 'OFF'}")
-        return True
-    
-    if black_ai_rect.collidepoint(x, y):
-        BLACK_AI = not BLACK_AI
-        print(f"Black AI toggled: {'ON' if BLACK_AI else 'OFF'}")
-        return True
-    
-    return False
+def draw_tinker_button(screen):
+    """Draw the button to open Tinker Panel."""
+    font = p.font.SysFont(None, 22)
+    p.draw.rect(screen, (100, 100, 150), tinker_button_rect)
+    text = font.render("Tinker Panel", True, p.Color("white"))
+    text_rect = text.get_rect(center=tinker_button_rect.center)
+    screen.blit(text, text_rect)
 
 def open_tinker_panel(board):
     """Open the Tinker's Control Panel to modify drawbacks and AI settings"""
@@ -166,10 +148,6 @@ def open_tinker_panel(board):
             white_drawback, black_drawback, updated_ai_settings, options = result
             
             # Update AI control flags
-            WHITE_AI = updated_ai_settings["WHITE_AI"]
-            BLACK_AI = updated_ai_settings["BLACK_AI"]
-            AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
-            
             # Handle flip board option
             if options.get("FLIP_BOARD", False):
                 flipped = not flipped
@@ -220,34 +198,15 @@ def change_drawback(board, color, new_drawback=None):
     color_name = "White" if color == chess.WHITE else "Black"
     print(f"Changed {color_name}'s drawback to: {new_drawback}")
 
-def display_help(screen):
-    """Display help text with keyboard controls"""
-    help_font = p.font.SysFont(None, 20)
-    help_texts = [
-        "R: Restart Game",
-        "F: Flip Board",
-        "T: Open Tinker Panel",
-        "1: Random White Drawback",
-        "2: Random Black Drawback", 
-        "W: Toggle White AI",
-        "B: Toggle Black AI",
-        "H: Toggle Help"
-    ]
-    
-    for i, text in enumerate(help_texts):
-        text_surf = help_font.render(text, True, p.Color("white"), p.Color("black"))
-        screen.blit(text_surf, (10, HEIGHT - 30 * (len(help_texts) - i)))
-
 def main():
     """Main game loop for Drawback Chess."""
-    global game_over, winner_color, WHITE_AI, BLACK_AI
+    global game_over, winner_color, WHITE_AI, BLACK_AI, flipped
     
     p.init()
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
     p.display.set_caption("Drawback Chess")
 
-    load_images()
     board = DrawbackBoard()
     assign_random_drawbacks(board)  # Assign random drawbacks to each player
     board.reset()
@@ -276,7 +235,6 @@ def main():
     selected_square = None
     game_over = False
     winner_color = None
-    show_help = True
 
     while running:
         for event in p.event.get():
@@ -286,66 +244,71 @@ def main():
             elif event.type == p.MOUSEBUTTONDOWN:
                 x, y = event.pos
                 
-                # First check if an AI checkbox was clicked
-                if check_ai_checkbox_click((x, y)):
+                # Check if Tinker Panel button was clicked
+                if tinker_button_rect.collidepoint(x, y):
+                    open_tinker_panel(board)
                     continue
                 
                 # Then handle game moves if not in game over state
                 if not game_over:
                     # Only allow user input if the current side is not AI
                     if not (WHITE_AI and board.turn == chess.WHITE) and not (BLACK_AI and board.turn == chess.BLACK):
-                        row, col = y // SQ_SIZE, x // SQ_SIZE
-
-                        # Convert screen coordinates to board coordinates
-                        if flipped:
-                            board_row = row 
-                            board_col = 7 - col
-                        else:
-                            board_row = 7 - row
-                            board_col = col
-
-                        clicked_square = chess.square(board_col, board_row)  # file, rank
-
-                        if selected_square is None:
-                            piece = board.piece_at(clicked_square)
-                            if piece and piece.color == board.turn:
-                                selected_square = clicked_square
-                                print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
-                        else:
-                            move = chess.Move(selected_square, clicked_square)
+                        # Adjust for board offset
+                        board_x = x - BOARD_X_OFFSET
+                        board_y = y - BOARD_Y_OFFSET
+                        
+                        # Check if click is within board bounds
+                        if (0 <= board_y < BOARD_HEIGHT and 
+                            0 <= board_x < BOARD_HEIGHT):  # Board is square
                             
-                            # Check if this move captures a king
-                            target = board.piece_at(clicked_square)
-                            is_king_capture = target and target.piece_type == chess.KING
-                            
-                            if board.is_legal(move):
-                                if is_king_capture:
-                                    print(f"Capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
-                                    
-                                print(f"Moving {board.piece_at(selected_square).symbol()} from {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
-                                board.push(move)
-                                selected_square = None
-                                
-                                # Check if the move resulted in a king capture (game over)
-                                if board.is_variant_end():
-                                    winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                                    game_over = True
+                            row, col = board_y // SQ_SIZE, board_x // SQ_SIZE
+
+                            # Convert screen coordinates to board coordinates
+                            if flipped:
+                                board_row = row 
+                                board_col = 7 - col
                             else:
-                                # Check if clicked on another piece of same color
+                                board_row = 7 - row
+                                board_col = col
+
+                            clicked_square = chess.square(board_col, board_row)  # file, rank
+
+                            if selected_square is None:
                                 piece = board.piece_at(clicked_square)
                                 if piece and piece.color == board.turn:
                                     selected_square = clicked_square
                                     print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
-                                else:
-                                    print(f"Illegal move: {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                            else:
+                                move = chess.Move(selected_square, clicked_square)
+                                
+                                # Check if this move captures a king
+                                target = board.piece_at(clicked_square)
+                                is_king_capture = target and target.piece_type == chess.KING
+                                
+                                if board.is_legal(move):
+                                    if is_king_capture:
+                                        print(f"Capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
+                                        
+                                    print(f"Moving {board.piece_at(selected_square).symbol()} from {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                                    board.push(move)
                                     selected_square = None
+                                    
+                                    # Check if the move resulted in a king capture (game over)
+                                    if board.is_variant_end():
+                                        winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
+                                        game_over = True
+                                else:
+                                    # Check if clicked on another piece of same color
+                                    piece = board.piece_at(clicked_square)
+                                    if piece and piece.color == board.turn:
+                                        selected_square = clicked_square
+                                        print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
+                                    else:
+                                        print(f"Illegal move: {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
+                                        selected_square = None
 
             elif event.type == p.KEYDOWN:
-                if event.key == p.K_f:
-                    # Flip the board
-                    flipped = not flipped
-                    print("Board flipping:", flipped)
-                elif event.key == p.K_r:
+                if event.key == p.K_r:
                     # Reset board and game state properly
                     board = DrawbackBoard()
                     assign_random_drawbacks(board)
@@ -356,26 +319,9 @@ def main():
                     winner_color = None
 
                     print("Game restarted!")
-                elif event.key == p.K_1:
-                    # Change White's drawback randomly
-                    change_drawback(board, chess.WHITE)
-                elif event.key == p.K_2:
-                    # Change Black's drawback randomly
-                    change_drawback(board, chess.BLACK)
                 elif event.key == p.K_t:
                     # Open Tinker's Control Panel
                     open_tinker_panel(board)
-                elif event.key == p.K_h:
-                    # Toggle help display
-                    show_help = not show_help
-                elif event.key == p.K_w:
-                    # Toggle White AI
-                    WHITE_AI = not WHITE_AI
-                    print(f"White AI: {'ON' if WHITE_AI else 'OFF'}")
-                elif event.key == p.K_b:
-                    # Toggle Black AI
-                    BLACK_AI = not BLACK_AI
-                    print(f"Black AI: {'ON' if BLACK_AI else 'OFF'}")
 
         if not game_over:
             # Let AI move if it's AI's turn
@@ -384,14 +330,22 @@ def main():
             if WHITE_AI and board.turn == chess.WHITE and HAS_AI:
                 ai_move(board)
 
-        draw_board(screen, DIMENSION, WIDTH, HEIGHT, flipped)
-        draw_pieces(screen, board, flipped, DIMENSION)
+        # Draw the board and pieces with both offsets
+        draw_board(screen, DIMENSION, BOARD_HEIGHT, BOARD_HEIGHT, flipped, BOARD_Y_OFFSET, BOARD_X_OFFSET)
+        draw_pieces(screen, board, flipped, DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         
-        # Display active drawbacks
-        display_drawbacks(screen, board)
+        # Display active drawbacks and turn info
+        display_drawbacks(screen, board, flipped)
+        display_current_turn(screen, board)
+        draw_tinker_button(screen)
         
-        # Highlight the selected square
+        # Highlight the selected square and legal moves
         if selected_square is not None:
+            # Draw highlight for selected square
+            highlight_surf = p.Surface((SQ_SIZE, SQ_SIZE), p.SRCALPHA)
+            highlight_surf.fill((255, 255, 0, 100))
+            
+            # Calculate correct position for highlight
             row = chess.square_rank(selected_square)
             col = chess.square_file(selected_square)
             if flipped:
@@ -401,50 +355,17 @@ def main():
                 draw_row = 7 - row
                 draw_col = col
                 
-            highlight_surf = p.Surface((SQ_SIZE, SQ_SIZE), p.SRCALPHA)
-            highlight_surf.fill((255, 255, 0, 100))
-            screen.blit(highlight_surf, (draw_col * SQ_SIZE, draw_row * SQ_SIZE))
+            # Apply highlight
+            screen.blit(highlight_surf, 
+                       (BOARD_X_OFFSET + draw_col * SQ_SIZE, 
+                        BOARD_Y_OFFSET + draw_row * SQ_SIZE))
             
-            # Also highlight legal moves
-            for move in board.legal_moves:
-                if move.from_square == selected_square:
-                    to_row = chess.square_rank(move.to_square)
-                    to_col = chess.square_file(move.to_square)
-                    
-                    if flipped:
-                        to_draw_row = to_row
-                        to_draw_col = 7 - to_col
-                    else:
-                        to_draw_row = 7 - to_row
-                        to_draw_col = to_col
-                    
-                    # Draw a circle for the legal move
-                    circle_surface = p.Surface((SQ_SIZE, SQ_SIZE), p.SRCALPHA)
-                    is_capture = board.piece_at(move.to_square) is not None
-                    
-                    # Special highlight for king captures
-                    target = board.piece_at(move.to_square)
-                    if target and target.piece_type == chess.KING:
-                        # Bright red highlight for king capture
-                        p.draw.circle(circle_surface, (255, 0, 0, 180), 
-                                    (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 2, 7)
-                    elif is_capture:
-                        p.draw.circle(circle_surface, (0, 0, 0, 120), 
-                                    (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 2, 7)
-                    else:
-                        p.draw.circle(circle_surface, (0, 0, 0, 120), 
-                                    (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 7)
-                    screen.blit(circle_surface, (to_draw_col * SQ_SIZE, to_draw_row * SQ_SIZE))
+            # Draw legal moves
+            draw_legal_move_indicators(screen, board, selected_square, flipped, 
+                                      DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
 
         if game_over and winner_color is not None:
             display_winner(screen, winner_color)
-            
-        # Display help if enabled
-        if show_help:
-            display_help(screen)
-        
-        # Display AI status
-        display_ai_status(screen)
 
         clock.tick(FPS)
         p.display.flip()

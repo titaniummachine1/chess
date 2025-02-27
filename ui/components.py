@@ -143,7 +143,7 @@ class Slider:
                 
     def is_clicked(self, pos):
         """Check if the thumb or track was clicked."""
-        return self.thumb_rect.collidepoint(pos) or self.track_rect.inflated(0, 20).collidepoint(pos)
+        return self.thumb_rect.collidepoint(pos) or self.track_rect.inflate(0, 20).collidepoint(pos)
     
     def start_drag(self, pos):
         """Start dragging the slider thumb."""
