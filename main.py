@@ -22,7 +22,8 @@ except ImportError:
 
 try:
     from AI.search import best_move
-    from AI.async_search import async_best_move, is_thinking, get_best_move, get_current_depth, get_progress
+    from AI.async_search import (async_best_move, is_thinking, get_best_move, 
+                               get_current_depth, get_progress, is_search_complete)
     HAS_AI = True
 except ImportError:
     print("Warning: AI module not available.")
@@ -197,35 +198,43 @@ def ai_move(board):
     """
     Executes AI move if it's AI's turn and the game isn't over.
     Uses asynchronous processing to avoid UI lag.
+    Only applies the move when the search has completed to the desired depth.
     """
     global game_over, winner_color
 
     if not HAS_AI:
         print("AI module not available - skipping AI move")
         return
-
-    # If AI is already thinking, check if it has a move ready
     if is_thinking():
         move = get_best_move()
         if move is not None:
-            # Check if this is a king capture move
-            target = board.piece_at(move.to_square)
-            if target and target.piece_type == chess.KING:
-                print(f"AI is capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
-            
-            board.push(move)
-            print(f"AI moved: {move}")
+            # Verify that the move is still legal on the current board
+            # This prevents issues where the board state changed during AI calculation
+            if move in board.legal_moves:
+                # Check if this is a king capture move
+                target = board.piece_at(move.to_square)
+                if target and target.piece_type == chess.KING:
+                    print(f"AI is capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
+                
+                board.push(move)
+                print(f"AI moved: {move}")
 
-            # Check if the AI won by capturing the king
-            if board.is_variant_end():
-                game_over = True
-                winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins by capturing the king!")
+                # Check if the AI won by capturing the king
+                if board.is_variant_end():
+                    game_over = True
+                    winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
+                    print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins by capturing the king!")
+            else:
+                print(f"Warning: AI suggested move {move} is no longer valid. Starting new search.")
+                # If the move is no longer valid, start a new search
+                async_best_move(board, AI_DEPTH)
         return
     
     # Otherwise, start a new AI search
     if not board.is_variant_end():
-        async_best_move(board, AI_DEPTH)
+        # Increase AI_DEPTH to minimum of 4 for better play quality
+        search_depth = max(AI_DEPTH, 4)
+        async_best_move(board, search_depth)
 
 def change_drawback(board, color, new_drawback=None):
     """
