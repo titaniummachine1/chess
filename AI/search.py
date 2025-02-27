@@ -1,14 +1,21 @@
 import numpy as np
+import chess
 from GameState.movegen import DrawbackBoard
 import AI.evaluation as evaluation
 
 def score_move(board, move):
     """
-    Simple move-ordering heuristic.
-    1. Prefer captures, especially if capturing a high-value piece with a low-value piece.
-    2. Otherwise, return a default score (0).
+    Simple move-ordering heuristic with king capture priority:
+    1. King captures are always preferred (highest priority)
+    2. Other captures based on MVV-LVA (Most Valuable Victim - Least Valuable Aggressor)
+    3. Non-captures have lowest priority
     """
     captured_piece = board.piece_at(move.to_square)
+    
+    # If capturing the king, give it maximum priority
+    if captured_piece and captured_piece.piece_type == chess.KING:
+        return 1000000  # Extremely high priority for king capture
+    
     if captured_piece:
         attacker = board.piece_at(move.from_square)
         # MVV-LVA approach:
@@ -23,18 +30,40 @@ def score_move(board, move):
 def negamax(board, depth, alpha, beta):
     """
     Negamax with alpha-beta pruning and basic move-ordering.
+    Correctly handles Drawback Chess where kings can be captured.
     """
-    if depth == 0 or board.is_variant_end():
+    # Check if a king has been captured (game over)
+    white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
+                           for p in board.piece_map().values())
+    black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
+                           for p in board.piece_map().values())
+    
+    # If a king is captured, return the appropriate win/loss score
+    if not white_king_alive:
+        return -evaluation.Score.CHECKMATE.value  # Black wins
+    if not black_king_alive:
+        return evaluation.Score.CHECKMATE.value   # White wins
+    
+    # Base case for regular evaluation
+    if depth == 0:
         return evaluation.evaluate(board)
 
     max_score = -evaluation.Score.CHECKMATE.value
-
+    
+    # First check for immediate king captures
+    for move in board.generate_legal_moves():
+        captured = board.piece_at(move.to_square)
+        if captured and captured.piece_type == chess.KING:
+            # Immediate king capture is a win
+            return evaluation.Score.CHECKMATE.value
+    
     # Get all legal moves
     moves = list(board.generate_legal_moves())
 
     if not moves:
-        # No moves => losing position
-        return -evaluation.Score.CHECKMATE.value
+        # No legal moves, but in Drawback Chess this isn't necessarily a loss
+        # Return a very bad score but not immediate loss
+        return -evaluation.Score.CHECKMATE.value // 2
 
     # Sort moves by a simple heuristic: capture priority
     # Higher score_move => earlier in list => improved pruning
@@ -43,6 +72,11 @@ def negamax(board, depth, alpha, beta):
     for move in moves:
         new_board = board.copy()
         new_board.push(move)
+        
+        # Check for immediate win after our move
+        captured = board.piece_at(move.to_square)
+        if captured and captured.piece_type == chess.KING:
+            return evaluation.Score.CHECKMATE.value  # Immediate win
 
         score = -negamax(new_board, depth - 1, -beta, -alpha)
 
@@ -59,17 +93,27 @@ def negamax(board, depth, alpha, beta):
 def best_move(board, depth) -> int:
     """
     Determines the best move using Negamax with alpha-beta and basic move-ordering.
+    Prioritizes king captures in Drawback Chess.
     """
     max_score = -evaluation.Score.CHECKMATE.value
     chosen_move = None
 
-    # Gather and order moves
+    # Gather all legal moves
     moves = list(board.generate_legal_moves())
-    moves.sort(key=lambda mv: score_move(board, mv), reverse=True)
-
+    
     if not moves:
         print("AI has no legal moves.")
         return None
+    
+    # Check for immediate king captures
+    for move in moves:
+        captured_piece = board.piece_at(move.to_square)
+        if captured_piece and captured_piece.piece_type == chess.KING:
+            print("AI finds king capture!")
+            return move  # Immediately return the king capture move
+    
+    # Sort moves for better pruning
+    moves.sort(key=lambda mv: score_move(board, mv), reverse=True)
 
     alpha = -evaluation.Score.CHECKMATE.value
     beta = evaluation.Score.CHECKMATE.value
@@ -88,7 +132,11 @@ def best_move(board, depth) -> int:
             break
 
     if chosen_move is None:
-        print("AI has no legal moves!")  # debugging
+        # If we somehow have no best move but do have legal moves,
+        # just choose a random one to avoid crashes
+        if moves:
+            chosen_move = moves[0]
+            print(f"AI choosing random move {chosen_move}")
     else:
         print(f"AI chooses {chosen_move}, eval={max_score}")
 

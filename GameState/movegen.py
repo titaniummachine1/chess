@@ -59,63 +59,87 @@ class DrawbackBoard(chess.Board):
                 for m in moves:
                     if not drawback_info["illegal_moves"](self, self.turn, m):
                         filtered.append(m)
-                    else:
-                        print(f"Drawback '{active_drawback}' blocked move: {m}")
+                    # Only show blocked move in detailed debugging
+                    # else:
+                    #     print(f"Drawback '{active_drawback}' blocked move: {m}")
                 moves = filtered
         return iter(moves)
 
     def is_variant_end(self):
+        """
+        In Drawback Chess, the game ends when one of the kings is captured.
+        """
         white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
                                for p in self.piece_map().values())
         black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
                                for p in self.piece_map().values())
 
+        # Game ends when a king is captured
         if not white_king_alive or not black_king_alive:
             return True
 
+        # Check for special drawback-related loss conditions
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
             drawback_info = get_drawback_info(active_drawback)
             if drawback_info and "loss_condition" in drawback_info:
                 condition = drawback_info["loss_condition"]
                 if callable(condition) and condition(self, self.turn):
-                    print(f"Drawback '{active_drawback}' caused a loss!")
                     return True
+                    
+        # No other end conditions - you must capture the king to win
         return False
 
     def is_variant_win(self):
+        """
+        In Drawback Chess, you win by capturing the opponent's king.
+        """
         white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
                                for p in self.piece_map().values())
         black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
                                for p in self.piece_map().values())
 
+        # White wins if Black's king is captured
         if not black_king_alive:
-            return True  # White is the winner
+            return True
+        # Black wins if White's king is captured    
         if not white_king_alive:
-            return False # Black is the winner
+            return False
+            
+        # No win yet if both kings are alive
         return False
 
     def is_variant_loss(self):
+        """
+        In Drawback Chess, you lose when your king is captured.
+        Having no legal moves doesn't mean you lose - the opponent must capture your king.
+        """
         if self.is_variant_end():
             return not self.is_variant_win()
-
-        if not any(self.generate_legal_moves()):
-            print(f"No moves left for {'White' if self.turn == chess.WHITE else 'Black'} => they lose.")
-            return True
+            
+        # Special case: if there are no legal moves but the game isn't over,
+        # we don't consider it a loss yet - the opponent must capture the king
         return False
 
     def is_legal(self, move):
+        """Check if a move is legal, with Drawback Chess special rules"""
+        # Normal legal moves from our generator
         if move in self.generate_legal_moves():
             return True
 
-        # Pawn capturing the king forcibly allowed
+        # Special case: allow capturing the king
         captured = self.piece_at(move.to_square)
-        from_piece = self.piece_at(move.from_square)
-        if (captured
-            and captured.piece_type == chess.KING
-            and from_piece
-            and from_piece.piece_type == chess.PAWN):
-            return True
+        if captured and captured.piece_type == chess.KING:
+            from_piece = self.piece_at(move.from_square)
+            if from_piece and from_piece.color != captured.color:
+                # Ensure move is otherwise valid (no drawback restrictions)
+                active_drawback = self.get_active_drawback(self.turn)
+                if active_drawback:
+                    drawback_info = get_drawback_info(active_drawback)
+                    if drawback_info and "illegal_moves" in drawback_info:
+                        if drawback_info["illegal_moves"](self, self.turn, move):
+                            return False  # Drawback blocks this move
+                return True  # King capture is allowed
 
         return False
 

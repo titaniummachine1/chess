@@ -11,7 +11,7 @@ from AI.search import best_move
 WIDTH, HEIGHT = 680, 680
 DIMENSION = 8
 SQ_SIZE = HEIGHT // DIMENSION
-FPS = 15
+FPS = 12
 AI_DEPTH = 3  # Adjust AI search depth (higher = stronger)
 
 WHITE_AI = False  # Set to True if you want White to be controlled by AI
@@ -25,7 +25,7 @@ def assign_drawbacks(board):
 def display_winner(screen, winner_color):
     """Display the winner and stop the game."""
     font = p.font.Font(None, 50)
-    text = f"{'White' if winner_color == chess.WHITE else 'Black'} wins! Press 'R' to restart."
+    text = f"{'White' if winner_color == chess.WHITE else 'Black'} wins by capturing the king! Press 'R' to restart."
     text_surf = font.render(text, True, p.Color("black"), p.Color("gold"))
     text_rect = text_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2))
     screen.blit(text_surf, text_rect)
@@ -38,14 +38,19 @@ def ai_move(board):
     if not board.is_variant_end():
         move = best_move(board, AI_DEPTH)
         if move:
+            # Check if this is a king capture move
+            target = board.piece_at(move.to_square)
+            if target and target.piece_type == chess.KING:
+                print(f"AI is capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
+            
             board.push(move)
             print(f"AI moved: {move}")
 
-            # Check if the AI won instantly
+            # Check if the AI won by capturing the king
             if board.is_variant_end():
                 game_over = True
                 winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
+                print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins by capturing the king!")
         else:
             print("AI has no legal moves!")
 
@@ -80,8 +85,8 @@ def main():
     global game_over, winner_color
     running = True
 
-    # IMPORTANT: flipped = False means White on bottom by default
-    flipped = False  # Start with White on bottom
+    # Default orientation: White on bottom, Black on top
+    flipped = False
 
     selected_square = None
     game_over = False
@@ -115,12 +120,20 @@ def main():
                             print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
                     else:
                         move = chess.Move(selected_square, clicked_square)
+                        
+                        # Check if this move captures a king
+                        target = board.piece_at(clicked_square)
+                        is_king_capture = target and target.piece_type == chess.KING
+                        
                         if board.is_legal(move):
+                            if is_king_capture:
+                                print(f"Capturing the {'White' if target.color == chess.WHITE else 'Black'} king!")
+                                
                             print(f"Moving {board.piece_at(selected_square).symbol()} from {chess.square_name(selected_square)} to {chess.square_name(clicked_square)}")
                             board.push(move)
                             selected_square = None
                             
-                            # Check if the move resulted in a win
+                            # Check if the move resulted in a king capture (game over)
                             if board.is_variant_end():
                                 winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
                                 game_over = True
@@ -192,7 +205,14 @@ def main():
                     # Draw a circle for the legal move
                     circle_surface = p.Surface((SQ_SIZE, SQ_SIZE), p.SRCALPHA)
                     is_capture = board.piece_at(move.to_square) is not None
-                    if is_capture:
+                    
+                    # Special highlight for king captures
+                    target = board.piece_at(move.to_square)
+                    if target and target.piece_type == chess.KING:
+                        # Bright red highlight for king capture
+                        p.draw.circle(circle_surface, (255, 0, 0, 180), 
+                                    (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 2, 7)
+                    elif is_capture:
                         p.draw.circle(circle_surface, (0, 0, 0, 120), 
                                     (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 2, 7)
                     else:
