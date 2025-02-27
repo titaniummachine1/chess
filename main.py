@@ -5,7 +5,21 @@ import random
 from utils import load_images, draw_board, draw_pieces, apply_legal_move, draw_highlights
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
-from AI.search import best_move
+
+# Try to import the TinkerPanel, but don't fail if pygame_gui is missing
+try:
+    from ui.tinker_panel import TinkerPanel
+    HAS_TINKER_PANEL = True
+except ImportError:
+    print("Warning: pygame_gui not found. Tinker's Control Panel will have limited functionality.")
+    HAS_TINKER_PANEL = False
+
+try:
+    from AI.search import best_move
+    HAS_AI = True
+except ImportError:
+    print("Warning: AI module not available.")
+    HAS_AI = False
 
 # Game Settings
 WIDTH, HEIGHT = 680, 680
@@ -66,9 +80,25 @@ def display_winner(screen, winner_color):
     screen.blit(text_surf, text_rect)
     p.display.flip()
 
+def open_tinker_panel(board):
+    """Open the Tinker's Control Panel to modify drawbacks"""
+    if HAS_TINKER_PANEL:
+        tinker_panel = TinkerPanel(board_reference=board)
+        white_drawback, black_drawback = tinker_panel.run()
+        
+        # Reinitialize the main screen
+        p.display.set_mode((WIDTH, HEIGHT))
+        p.display.set_caption("Drawback Chess")
+    else:
+        print("Tinker's Control Panel is not available due to missing pygame_gui.")
+
 def ai_move(board):
     """Executes AI move if it's AI's turn and the game isn't over."""
     global game_over, winner_color
+
+    if not HAS_AI:
+        print("AI module not available - skipping AI move")
+        return
 
     if not board.is_variant_end():
         move = best_move(board, AI_DEPTH)
@@ -100,6 +130,22 @@ def change_drawback(board, color, new_drawback=None):
     board.set_drawback(color, new_drawback)
     color_name = "White" if color == chess.WHITE else "Black"
     print(f"Changed {color_name}'s drawback to: {new_drawback}")
+
+def display_help(screen):
+    """Display help text with keyboard controls"""
+    help_font = p.font.SysFont(None, 20)
+    help_texts = [
+        "R: Restart Game",
+        "F: Flip Board",
+        "T: Open Tinker Panel",
+        "1: Random White Drawback",
+        "2: Random Black Drawback",
+        "H: Toggle Help"
+    ]
+    
+    for i, text in enumerate(help_texts):
+        text_surf = help_font.render(text, True, p.Color("white"), p.Color("black"))
+        screen.blit(text_surf, (10, HEIGHT - 30 * (len(help_texts) - i)))
 
 def main():
     """Main game loop for Drawback Chess."""
@@ -138,6 +184,7 @@ def main():
     selected_square = None
     game_over = False
     winner_color = None
+    show_help = True
 
     while running:
         for event in p.event.get():
@@ -211,17 +258,23 @@ def main():
 
                     print("Game restarted!")
                 elif event.key == p.K_1:
-                    # Change White's drawback
+                    # Change White's drawback randomly
                     change_drawback(board, chess.WHITE)
                 elif event.key == p.K_2:
-                    # Change Black's drawback
+                    # Change Black's drawback randomly
                     change_drawback(board, chess.BLACK)
+                elif event.key == p.K_t:
+                    # Open Tinker's Control Panel
+                    open_tinker_panel(board)
+                elif event.key == p.K_h:
+                    # Toggle help display
+                    show_help = not show_help
 
         if not game_over:
             # Let AI move if it's AI's turn
-            if BLACK_AI and board.turn == chess.BLACK:
+            if BLACK_AI and board.turn == chess.BLACK and HAS_AI:
                 ai_move(board)
-            if WHITE_AI and board.turn == chess.WHITE:
+            if WHITE_AI and board.turn == chess.WHITE and HAS_AI:
                 ai_move(board)
 
         draw_board(screen, DIMENSION, WIDTH, HEIGHT, flipped)
@@ -278,6 +331,10 @@ def main():
 
         if game_over and winner_color is not None:
             display_winner(screen, winner_color)
+            
+        # Display help if enabled
+        if show_help:
+            display_help(screen)
 
         clock.tick(FPS)
         p.display.flip()

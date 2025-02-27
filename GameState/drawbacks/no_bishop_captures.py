@@ -10,7 +10,7 @@ def illegal_moves(board, color, move):
     if (piece and piece.color == color and 
         piece.piece_type == chess.BISHOP and 
         target is not None):  # Attempting to capture
-        print(f"Blocking Bishop capture: {move}")
+        # Removed print statement to avoid spamming console
         return True  # Bishop capture is illegal
     return False
 
