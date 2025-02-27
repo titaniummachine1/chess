@@ -3,6 +3,8 @@ import sys
 import os
 import chess
 from GameState.drawback_manager import get_drawback_info, DRAWBACKS
+from ui.components import Button, Checkbox, Slider, SearchBox
+from ui.drawback_list import DrawbackList
 
 class TinkerPanel:
     """
@@ -20,7 +22,7 @@ class TinkerPanel:
         self.callback = callback  # Callback to update the main game
         
         # AI control settings
-        self.ai_settings = ai_settings or {"WHITE_AI": False, "BLACK_AI": True}
+        self.ai_settings = ai_settings or {"WHITE_AI": False, "BLACK_AI": True, "AI_DEPTH": 3}
         
         # Initialize Pygame if not already done
         if not p.get_init():
@@ -30,44 +32,20 @@ class TinkerPanel:
         self.window = p.display.set_mode((width, height), p.RESIZABLE)
         p.display.set_caption("Drawback Chess - Tinker's Control Panel")
         
-        # Current search queries
-        self.white_search = ""
-        self.black_search = ""
-        
-        # Currently selected drawbacks
-        self.selected_white_drawback = None
-        self.selected_black_drawback = None
-        
         # Font settings
         self.title_font = p.font.SysFont(None, 36)
         self.normal_font = p.font.SysFont(None, 24)
         self.small_font = p.font.SysFont(None, 20)
         
-        # UI areas
-        self.white_area = p.Rect(20, 60, int(width/2) - 30, height - 80)
-        self.black_area = p.Rect(int(width/2) + 10, 60, int(width/2) - 30, height - 80)
-        self.close_rect = p.Rect(width/2 - 60, height - 60, 120, 40)
+        # UI colors
+        self.bg_color = (50, 50, 50)
+        self.text_color = (255, 255, 255)
         
-        # AI toggle buttons
-        self.white_ai_rect = p.Rect(40, 60, 20, 20)
-        self.black_ai_rect = p.Rect(int(width/2) + 30, 60, 20, 20)
+        # Initialize UI components
+        self._init_ui_components()
         
-        # Lists for drawback buttons
-        self.white_buttons = []
-        self.black_buttons = []
-        
-        # Text input areas
-        self.white_search_rect = p.Rect(40, 100, 260, 30)
-        self.black_search_rect = p.Rect(int(width/2) + 30, 100, 260, 30)
-        
-        # Scrolling parameters
-        self.white_scroll_y = 0
-        self.black_scroll_y = 0
-        self.max_white_scroll = 0
-        self.max_black_scroll = 0
-        
-        # Active text input (None, 'white', or 'black')
-        self.active_input = None
+        # Initialize drawback lists
+        self._init_drawback_lists()
         
         # Running flag
         self.running = True
@@ -75,362 +53,235 @@ class TinkerPanel:
         # Clock for limiting frame rate
         self.clock = p.time.Clock()
         
-        # Load current drawbacks from the board if available
-        self.load_current_drawbacks()
-        
-        # Populate drawback lists
-        self.populate_drawbacks_lists()
+        # Results flags
+        self.flip_board = False
     
-    def load_current_drawbacks(self):
-        """Load the current drawbacks from the board"""
+    def _init_ui_components(self):
+        """Initialize UI components like buttons, checkboxes, etc."""
+        # Action buttons
+        self.close_button = Button(
+            self.width/2 - 60, self.height - 60, 120, 40, "Close",
+            bg_color=(150, 50, 50)
+        )
+        
+        self.restart_button = Button(
+            self.width/2 - 150, self.height - 60, 80, 40, "Restart",
+            bg_color=(0, 150, 0)
+        )
+        
+        self.flip_button = Button(
+            self.width/2 + 70, self.height - 60, 80, 40, "Flip",
+            bg_color=(150, 100, 0)
+        )
+        
+        # AI controls
+        self.white_ai_checkbox = Checkbox(
+            40, 60, 15, "AI Control", font=self.small_font
+        )
+        self.white_ai_checkbox.checked = self.ai_settings.get("WHITE_AI", False)
+        
+        self.black_ai_checkbox = Checkbox(
+            int(self.width/2) + 30, 60, 15, "AI Control", font=self.small_font
+        )
+        self.black_ai_checkbox.checked = self.ai_settings.get("BLACK_AI", True)
+        
+        # AI Depth slider
+        self.ai_depth_slider = Slider(
+            self.width/2 - 120, 85, 240, 10, 1, 5,
+            self.ai_settings.get("AI_DEPTH", 3),
+            text="AI Depth"
+        )
+    
+    def _init_drawback_lists(self):
+        """Initialize the white and black drawback lists."""
+        # Create drawback lists
+        self.white_drawbacks = DrawbackList(
+            20, 110, int(self.width/2) - 30, self.height - 180, chess.WHITE, self.small_font
+        )
+        
+        self.black_drawbacks = DrawbackList(
+            int(self.width/2) + 10, 110, int(self.width/2) - 30, self.height - 180, chess.BLACK, self.small_font
+        )
+        
+        # Load current drawbacks from the board if available
         if self.board:
             white_drawback = self.board.get_active_drawback(chess.WHITE)
             black_drawback = self.board.get_active_drawback(chess.BLACK)
             
             if white_drawback:
-                self.selected_white_drawback = white_drawback
+                self.white_drawbacks.selected_drawback = white_drawback
             
             if black_drawback:
-                self.selected_black_drawback = black_drawback
+                self.black_drawbacks.selected_drawback = black_drawback
+        
+        # Populate drawback lists
+        self.white_drawbacks.populate_list(self.white_drawbacks.selected_drawback)
+        self.black_drawbacks.populate_list(self.black_drawbacks.selected_drawback)
     
-    def populate_drawbacks_lists(self):
-        """Populate the drawbacks lists based on search queries"""
-        # Clear existing buttons
-        self.white_buttons = []
-        self.black_buttons = []
-        
-        # Get all drawbacks sorted alphabetically
-        all_drawbacks = sorted(DRAWBACKS.keys())
-        
-        # Filter drawbacks based on search queries
-        white_drawbacks = [d for d in all_drawbacks if self.white_search.lower() in d.lower()]
-        black_drawbacks = [d for d in all_drawbacks if self.black_search.lower() in d.lower()]
-        
-        # Create White drawback buttons
-        btn_height = 30
-        spacing = 10
-        y_pos = 180
-        
-        for drawback in white_drawbacks:
-            # Get display name
-            display_name = drawback.replace('_', ' ').title()
+    def wrap_text(self, text, font, max_width):
+        """Wrap text to fit within a given width."""
+        if not text:
+            return []
             
-            # Create button rect
-            btn_rect = p.Rect(40, y_pos, 260, btn_height)
-            
-            # Add to list with metadata
-            self.white_buttons.append({
-                'rect': btn_rect,
-                'text': display_name,
-                'id': drawback,
-                'color': chess.WHITE,
-                'active': self.selected_white_drawback == drawback
-            })
-            
-            y_pos += btn_height + spacing
+        words = text.split(' ')
+        lines = []
+        current_line = []
+        current_width = 0
         
-        # Store max scroll value for white buttons
-        self.max_white_scroll = max(0, y_pos - self.height + 60)
-        
-        # Create Black drawback buttons
-        y_pos = 180
-        
-        for drawback in black_drawbacks:
-            # Get display name
-            display_name = drawback.replace('_', ' ').title()
+        for word in words:
+            word_surface = font.render(word + ' ', True, self.text_color)
+            word_width = word_surface.get_width()
             
-            # Create button rect
-            btn_rect = p.Rect(int(self.width/2) + 30, y_pos, 260, btn_height)
-            
-            # Add to list with metadata
-            self.black_buttons.append({
-                'rect': btn_rect,
-                'text': display_name,
-                'id': drawback,
-                'color': chess.BLACK,
-                'active': self.selected_black_drawback == drawback
-            })
-            
-            y_pos += btn_height + spacing
-        
-        # Store max scroll value for black buttons
-        self.max_black_scroll = max(0, y_pos - self.height + 60)
-    
-    def apply_drawback(self, drawback_id, color):
-        """Apply the selected drawback to the specified player"""
-        if self.board:
-            self.board.set_drawback(color, drawback_id)
-            
-            # Update selected drawbacks
-            if color == chess.WHITE:
-                self.selected_white_drawback = drawback_id
+            if current_width + word_width > max_width:
+                lines.append(' '.join(current_line))
+                current_line = [word]
+                current_width = word_width
             else:
-                self.selected_black_drawback = drawback_id
+                current_line.append(word)
+                current_width += word_width
+        
+        if current_line:
+            lines.append(' '.join(current_line))
             
-            # Update UI
-            self.populate_drawbacks_lists()
-    
-    def toggle_ai(self, color):
-        """Toggle AI control for a specific player"""
-        if color == chess.WHITE:
-            self.ai_settings["WHITE_AI"] = not self.ai_settings["WHITE_AI"]
-        else:
-            self.ai_settings["BLACK_AI"] = not self.ai_settings["BLACK_AI"]
+        return lines
     
     def draw(self):
-        """Draw the UI"""
+        """Draw all UI components to the screen."""
         # Fill background
-        self.window.fill((50, 50, 50))  # Dark gray
+        self.window.fill(self.bg_color)
         
         # Draw title
-        title_surf = self.title_font.render("Drawback Chess - Tinker's Control Panel", True, (255, 255, 255))
+        title_surf = self.title_font.render("Drawback Chess - Tinker's Control Panel", True, self.text_color)
         title_rect = title_surf.get_rect(center=(self.width/2, 30))
         self.window.blit(title_surf, title_rect)
         
         # Draw divider line
-        p.draw.line(self.window, (150, 150, 150), (self.width/2, 60), (self.width/2, self.height - 70), 2)
+        p.draw.line(self.window, (150, 150, 150), 
+                   (self.width/2, 60), 
+                   (self.width/2, self.height - 70), 2)
         
-        # Draw white section title
-        white_title = self.normal_font.render("White Drawbacks", True, (70, 60))
-        self.window.blit(white_title, (70, 60))
+        # Draw AI controls
+        self.white_ai_checkbox.draw(self.window)
+        self.black_ai_checkbox.draw(self.window)
+        self.ai_depth_slider.draw(self.window)
         
-        # Draw black section title
-        black_title = self.normal_font.render("Black Drawbacks", True, (int(self.width/2) + 60, 60))
-        self.window.blit(black_title, (int(self.width/2) + 60, 60))
+        # Draw drawback lists
+        white_hover = self.white_drawbacks.draw(self.window)
+        black_hover = self.black_drawbacks.draw(self.window)
         
-        # Draw AI checkboxes and labels
-        # White AI
-        p.draw.rect(self.window, (200, 200, 200), self.white_ai_rect)
-        if self.ai_settings["WHITE_AI"]:
-            p.draw.line(self.window, (0, 0, 0), 
-                       (self.white_ai_rect.left + 2, self.white_ai_rect.top + 2),
-                       (self.white_ai_rect.right - 2, self.white_ai_rect.bottom - 2), 2)
-            p.draw.line(self.window, (0, 0, 0), 
-                       (self.white_ai_rect.left + 2, self.white_ai_rect.bottom - 2),
-                       (self.white_ai_rect.right - 2, self.white_ai_rect.top + 2), 2)
+        # Draw buttons
+        self.close_button.draw(self.window)
+        self.restart_button.draw(self.window)
+        self.flip_button.draw(self.window)
         
-        white_ai_label = self.small_font.render("AI Control", True, (255, 255, 255))
-        self.window.blit(white_ai_label, (self.white_ai_rect.right + 5, self.white_ai_rect.top))
-        
-        # Black AI
-        p.draw.rect(self.window, (200, 200, 200), self.black_ai_rect)
-        if self.ai_settings["BLACK_AI"]:
-            p.draw.line(self.window, (0, 0, 0), 
-                       (self.black_ai_rect.left + 2, self.black_ai_rect.top + 2),
-                       (self.black_ai_rect.right - 2, self.black_ai_rect.bottom - 2), 2)
-            p.draw.line(self.window, (0, 0, 0), 
-                       (self.black_ai_rect.left + 2, self.black_ai_rect.bottom - 2),
-                       (self.black_ai_rect.right - 2, self.black_ai_rect.top + 2), 2)
-        
-        black_ai_label = self.small_font.render("AI Control", True, (255, 255, 255))
-        self.window.blit(black_ai_label, (self.black_ai_rect.right + 5, self.black_ai_rect.top))
-        
-        # Draw search boxes
-        p.draw.rect(self.window, (200, 200, 200), self.white_search_rect, 0 if self.active_input == 'white' else 2)
-        p.draw.rect(self.window, (200, 200, 200), self.black_search_rect, 0 if self.active_input == 'black' else 2)
-        
-        # Draw search text
-        white_search_surf = self.normal_font.render(self.white_search, True, (0, 0, 0))
-        black_search_surf = self.normal_font.render(self.black_search, True, (0, 0, 0))
-        
-        self.window.blit(white_search_surf, (self.white_search_rect.x + 5, self.white_search_rect.y + 5))
-        self.window.blit(black_search_surf, (self.black_search_rect.x + 5, self.black_search_rect.y + 5))
-        
-        # Draw search placeholders if empty
-        if not self.white_search:
-            placeholder = self.small_font.render("Search White Drawbacks...", True, (120, 120, 120))
-            self.window.blit(placeholder, (self.white_search_rect.x + 5, self.white_search_rect.y + 7))
-        
-        if not self.black_search:
-            placeholder = self.small_font.render("Search Black Drawbacks...", True, (120, 120, 120))
-            self.window.blit(placeholder, (self.black_search_rect.x + 5, self.black_search_rect.y + 7))
-        
-        # Draw current selections
-        white_curr = self.normal_font.render(
-            f"Current: {self.selected_white_drawback.replace('_', ' ').title() if self.selected_white_drawback else 'None'}", 
-            True, (255, 255, 255)
-        )
-        black_curr = self.normal_font.render(
-            f"Current: {self.selected_black_drawback.replace('_', ' ').title() if self.selected_black_drawback else 'None'}", 
-            True, (255, 255, 255)
-        )
-        
-        self.window.blit(white_curr, (40, 140))
-        self.window.blit(black_curr, (int(self.width/2) + 30, 140))
-        
-        # Draw white drawback buttons (with scrolling)
-        for button in self.white_buttons:
-            # Adjust for scrolling
-            adjusted_rect = p.Rect(
-                button['rect'].x, 
-                button['rect'].y - self.white_scroll_y, 
-                button['rect'].width, 
-                button['rect'].height
-            )
+        # Display hover description for drawback (from either list)
+        hover_description = white_hover or black_hover
+        if hover_description:
+            # Create a semi-transparent background
+            desc_surf = p.Surface((self.width, 60), p.SRCALPHA)
+            desc_surf.fill((0, 0, 0, 180))
+            self.window.blit(desc_surf, (0, self.height - 110))
             
-            # Only draw if in view
-            if adjusted_rect.y >= 170 and adjusted_rect.y <= self.height - 70:
-                # Draw button
-                color = (150, 150, 255) if button['active'] else (100, 100, 100)
-                p.draw.rect(self.window, color, adjusted_rect)
-                
-                # Draw button text
-                text_surf = self.small_font.render(button['text'], True, (255, 255, 255))
-                text_rect = text_surf.get_rect(midleft=(adjusted_rect.x + 10, adjusted_rect.y + adjusted_rect.height/2))
-                self.window.blit(text_surf, text_rect)
-        
-        # Draw black drawback buttons (with scrolling)
-        for button in self.black_buttons:
-            # Adjust for scrolling
-            adjusted_rect = p.Rect(
-                button['rect'].x, 
-                button['rect'].y - self.black_scroll_y, 
-                button['rect'].width, 
-                button['rect'].height
-            )
+            # Wrap and render description text
+            wrapped_lines = self.wrap_text(hover_description, self.small_font, self.width - 40)
             
-            # Only draw if in view
-            if adjusted_rect.y >= 170 and adjusted_rect.y <= self.height - 70:
-                # Draw button
-                color = (150, 150, 255) if button['active'] else (100, 100, 100)
-                p.draw.rect(self.window, color, adjusted_rect)
-                
-                # Draw button text
-                text_surf = self.small_font.render(button['text'], True, (255, 255, 255))
-                text_rect = text_surf.get_rect(midleft=(adjusted_rect.x + 10, adjusted_rect.y + adjusted_rect.height/2))
-                self.window.blit(text_surf, text_rect)
-        
-        # Draw scroll indicators if needed
-        if self.max_white_scroll > 0:
-            # Draw up/down arrows
-            p.draw.polygon(self.window, (200, 200, 200), [(30, 200), (20, 220), (40, 220)])
-            p.draw.polygon(self.window, (200, 200, 200), [(30, self.height - 100), (20, self.height - 120), (40, self.height - 120)])
-        
-        if self.max_black_scroll > 0:
-            # Draw up/down arrows
-            x_offset = int(self.width/2) + 5
-            p.draw.polygon(self.window, (200, 200, 200), [(x_offset + 10, 200), (x_offset, 220), (x_offset + 20, 220)])
-            p.draw.polygon(self.window, (200, 200, 200), [(x_offset + 10, self.height - 100), (x_offset, self.height - 120), (x_offset + 20, self.height - 120)])
-        
-        # Draw close button
-        p.draw.rect(self.window, (150, 50, 50), self.close_rect)
-        close_text = self.normal_font.render("Close", True, (255, 255, 255))
-        close_rect = close_text.get_rect(center=self.close_rect.center)
-        self.window.blit(close_text, close_rect)
+            for i, line in enumerate(wrapped_lines):
+                desc_text = self.small_font.render(line, True, (255, 255, 255))
+                desc_rect = desc_text.get_rect(center=(self.width/2, self.height - 100 + i*20))
+                self.window.blit(desc_text, desc_rect)
         
         # Update display
         p.display.flip()
     
-    def handle_mouse_click(self, pos):
-        """Handle mouse click events"""
-        x, y = pos
-        
-        # Check if clicked on close button
-        if self.close_rect.collidepoint(x, y):
+    def handle_event(self, event):
+        """Handle pygame events for the panel."""
+        if event.type == p.QUIT:
             self.running = False
-            return
-        
-        # Check if clicked on AI checkboxes
-        if self.white_ai_rect.collidepoint(x, y):
-            self.toggle_ai(chess.WHITE)
-            return
-        
-        if self.black_ai_rect.collidepoint(x, y):
-            self.toggle_ai(chess.BLACK)
-            return
-        
-        # Check if clicked on white search box
-        if self.white_search_rect.collidepoint(x, y):
-            self.active_input = 'white'
-            return
-        
-        # Check if clicked on black search box
-        if self.black_search_rect.collidepoint(x, y):
-            self.active_input = 'black'
-            return
-        
-        # Deactivate text input if clicked elsewhere
-        self.active_input = None
-        
-        # Check white drawback buttons (with scrolling adjustment)
-        for button in self.white_buttons:
-            adjusted_rect = p.Rect(
-                button['rect'].x, 
-                button['rect'].y - self.white_scroll_y, 
-                button['rect'].width, 
-                button['rect'].height
-            )
+            return True
+
+        elif event.type == p.MOUSEBUTTONDOWN:
+            pos = event.pos
             
-            if adjusted_rect.collidepoint(x, y):
-                self.apply_drawback(button['id'], chess.WHITE)
-                return
-        
-        # Check black drawback buttons (with scrolling adjustment)
-        for button in self.black_buttons:
-            adjusted_rect = p.Rect(
-                button['rect'].x, 
-                button['rect'].y - self.black_scroll_y, 
-                button['rect'].width, 
-                button['rect'].height
-            )
+            # Handle button clicks
+            if self.close_button.is_clicked(pos):
+                self.running = False
+                return True
             
-            if adjusted_rect.collidepoint(x, y):
-                self.apply_drawback(button['id'], chess.BLACK)
-                return
-    
-    def handle_key_press(self, key, unicode_char):
-        """Handle key press events"""
-        if self.active_input == 'white':
-            if key == p.K_BACKSPACE:
-                self.white_search = self.white_search[:-1]
-            elif key == p.K_RETURN:
-                self.populate_drawbacks_lists()
-                self.active_input = None
-            else:
-                self.white_search += unicode_char
-            self.populate_drawbacks_lists()
+            if self.restart_button.is_clicked(pos):
+                # Signal to restart the game
+                if self.board:
+                    self.board.reset()
+                return True
+            
+            if self.flip_button.is_clicked(pos):
+                self.flip_board = True
+                return True
+            
+            # Handle AI checkboxes
+            if self.white_ai_checkbox.is_clicked(pos):
+                self.white_ai_checkbox.toggle()
+                self.ai_settings["WHITE_AI"] = self.white_ai_checkbox.checked
+                return True
+            
+            if self.black_ai_checkbox.is_clicked(pos):
+                self.black_ai_checkbox.toggle()
+                self.ai_settings["BLACK_AI"] = self.black_ai_checkbox.checked
+                return True
+            
+            # Handle AI depth slider
+            if self.ai_depth_slider.is_clicked(pos):
+                self.ai_depth_slider.start_drag(pos)
+                return True
+            
+            # Handle drawback list clicks - pass the board for immediate application
+            if self.white_drawbacks.handle_click(pos, self.board):
+                return True
+            
+            if self.black_drawbacks.handle_click(pos, self.board):
+                return True
         
-        elif self.active_input == 'black':
-            if key == p.K_BACKSPACE:
-                self.black_search = self.black_search[:-1]
-            elif key == p.K_RETURN:
-                self.populate_drawbacks_lists()
-                self.active_input = None
-            else:
-                self.black_search += unicode_char
-            self.populate_drawbacks_lists()
-    
-    def handle_mouse_wheel(self, y):
-        """Handle mouse wheel scrolling"""
-        mouse_x, _ = p.mouse.get_pos()
+        elif event.type == p.MOUSEBUTTONUP:
+            # Handle AI depth slider release
+            if self.ai_depth_slider.is_dragging:
+                self.ai_depth_slider.stop_drag()
+                self.ai_settings["AI_DEPTH"] = self.ai_depth_slider.value
+                return True
         
-        # If mouse is in white area
-        if mouse_x < self.width/2:
-            self.white_scroll_y = max(0, min(self.max_white_scroll, self.white_scroll_y - y * 20))
-        # If mouse is in black area
-        else:
-            self.black_scroll_y = max(0, min(self.max_black_scroll, self.black_scroll_y - y * 20))
+        elif event.type == p.MOUSEMOTION:
+            # Handle AI depth slider drag
+            if self.ai_depth_slider.is_dragging:
+                self.ai_depth_slider.update_drag(event.pos)
+                return True
+        
+        elif event.type == p.KEYDOWN:
+            if event.key == p.K_ESCAPE:
+                self.running = False
+                return True
+            
+            # Handle search box input
+            if self.white_drawbacks.handle_key(event):
+                return True
+            
+            if self.black_drawbacks.handle_key(event):
+                return True
+        
+        # Handle mouse wheel scrolling
+        elif event.type == p.MOUSEWHEEL:
+            # Determine which list to scroll based on mouse position
+            mouse_x = p.mouse.get_pos()[0]
+            if mouse_x < self.width/2:
+                self.white_drawbacks.handle_scroll(event.y)
+            else:
+                self.black_drawbacks.handle_scroll(event.y)
+            return True
+        
+        return False
     
     def run(self):
-        """Main loop for the Tinker's Control Panel"""
+        """Main loop for the Tinker's Control Panel."""
         while self.running:
             for event in p.event.get():
-                if event.type == p.QUIT:
-                    self.running = False
-                
-                elif event.type == p.MOUSEBUTTONDOWN:
-                    if event.button == 1:  # Left click
-                        self.handle_mouse_click(event.pos)
-                    elif event.button == 4:  # Scroll up
-                        self.handle_mouse_wheel(1)
-                    elif event.button == 5:  # Scroll down
-                        self.handle_mouse_wheel(-1)
-                
-                elif event.type == p.KEYDOWN:
-                    if event.key == p.K_ESCAPE:
-                        self.running = False
-                    else:
-                        self.handle_key_press(event.key, event.unicode)
+                self.handle_event(event)
             
             # Draw the UI
             self.draw()
@@ -438,6 +289,6 @@ class TinkerPanel:
             # Cap the frame rate
             self.clock.tick(60)
         
-        # Properly close only this window, not the entire application
-        pygame_window = p.display.get_surface()
-        return (self.selected_white_drawback, self.selected_black_drawback, self.ai_settings)
+        # Return the selected drawbacks, AI settings, and other options
+        return (self.white_drawbacks.selected_drawback, self.black_drawbacks.selected_drawback, 
+                self.ai_settings, {"FLIP_BOARD": self.flip_board})

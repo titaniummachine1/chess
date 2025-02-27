@@ -23,10 +23,13 @@ except ImportError:
 
 # Game Settings
 WIDTH, HEIGHT = 680, 680
+BOARD_HEIGHT = 600  # Actual board height
+BOARD_Y_OFFSET = 40  # Space at the top for white text
 DIMENSION = 8
-SQ_SIZE = HEIGHT // DIMENSION
+SQ_SIZE = BOARD_HEIGHT // DIMENSION
 FPS = 12
 AI_DEPTH = 3  # Adjust AI search depth (higher = stronger)
+AI_SPEED_DELAY = 0.3  # Default delay in seconds between AI moves
 
 # Global variables
 game_over = False
@@ -36,8 +39,13 @@ WHITE_AI = False
 BLACK_AI = True
 
 # UI elements for AI control in main game
-white_ai_checkbox = p.Rect(10, HEIGHT - 25, 15, 15)
-black_ai_checkbox = p.Rect(WIDTH - 80, HEIGHT - 25, 15, 15)
+white_ai_rect = p.Rect(10, 10, 15, 15)
+black_ai_rect = p.Rect(WIDTH - 80, HEIGHT - 30, 15, 15)
+
+# Button rects
+tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 25)
+restart_button_rect = p.Rect(WIDTH - 230, 10, 100, 25)
+flip_button_rect = p.Rect(10, HEIGHT - 30, 60, 25)
 
 # List of available drawbacks
 AVAILABLE_DRAWBACKS = [
@@ -94,44 +102,44 @@ def display_ai_status(screen):
     font = p.font.SysFont(None, 20)
     
     # Draw white AI checkbox and label
-    p.draw.rect(screen, (255, 255, 255), white_ai_checkbox)
+    p.draw.rect(screen, (255, 255, 255), white_ai_rect)
     if WHITE_AI:
         # Draw X in checkbox when AI is on
         p.draw.line(screen, (0, 0, 0), 
-                   (white_ai_checkbox.left + 2, white_ai_checkbox.top + 2),
-                   (white_ai_checkbox.right - 2, white_ai_checkbox.bottom - 2), 2)
+                   (white_ai_rect.left + 2, white_ai_rect.top + 2),
+                   (white_ai_rect.right - 2, white_ai_rect.bottom - 2), 2)
         p.draw.line(screen, (0, 0, 0), 
-                   (white_ai_checkbox.left + 2, white_ai_checkbox.bottom - 2),
-                   (white_ai_checkbox.right - 2, white_ai_checkbox.top + 2), 2)
+                   (white_ai_rect.left + 2, white_ai_rect.bottom - 2),
+                   (white_ai_rect.right - 2, white_ai_rect.top + 2), 2)
     
     white_text = font.render("White AI", True, p.Color("white"))
-    screen.blit(white_text, (white_ai_checkbox.right + 5, white_ai_checkbox.top))
+    screen.blit(white_text, (white_ai_rect.right + 5, white_ai_rect.top))
     
     # Draw black AI checkbox and label
-    p.draw.rect(screen, (255, 255, 255), black_ai_checkbox)
+    p.draw.rect(screen, (255, 255, 255), black_ai_rect)
     if BLACK_AI:
         # Draw X in checkbox when AI is on
         p.draw.line(screen, (0, 0, 0), 
-                   (black_ai_checkbox.left + 2, black_ai_checkbox.top + 2),
-                   (black_ai_checkbox.right - 2, black_ai_checkbox.bottom - 2), 2)
+                   (black_ai_rect.left + 2, black_ai_rect.top + 2),
+                   (black_ai_rect.right - 2, black_ai_rect.bottom - 2), 2)
         p.draw.line(screen, (0, 0, 0), 
-                   (black_ai_checkbox.left + 2, black_ai_checkbox.bottom - 2),
-                   (black_ai_checkbox.right - 2, black_ai_checkbox.top + 2), 2)
+                   (black_ai_rect.left + 2, black_ai_rect.bottom - 2),
+                   (black_ai_rect.right - 2, black_ai_rect.top + 2), 2)
     
     black_text = font.render("Black AI", True, p.Color("white"))
-    screen.blit(black_text, (black_ai_checkbox.right + 5, black_ai_checkbox.top))
+    screen.blit(black_text, (black_ai_rect.right + 5, black_ai_rect.top))
 
 def check_ai_checkbox_click(pos):
     """Check if an AI checkbox was clicked and toggle it"""
     global WHITE_AI, BLACK_AI
     x, y = pos
     
-    if white_ai_checkbox.collidepoint(x, y):
+    if white_ai_rect.collidepoint(x, y):
         WHITE_AI = not WHITE_AI
         print(f"White AI toggled: {'ON' if WHITE_AI else 'OFF'}")
         return True
     
-    if black_ai_checkbox.collidepoint(x, y):
+    if black_ai_rect.collidepoint(x, y):
         BLACK_AI = not BLACK_AI
         print(f"Black AI toggled: {'ON' if BLACK_AI else 'OFF'}")
         return True
@@ -140,24 +148,32 @@ def check_ai_checkbox_click(pos):
 
 def open_tinker_panel(board):
     """Open the Tinker's Control Panel to modify drawbacks and AI settings"""
-    global WHITE_AI, BLACK_AI
+    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH
     
     if HAS_TINKER_PANEL:
         # Pass current AI settings to the panel
         ai_settings = {
             "WHITE_AI": WHITE_AI,
-            "BLACK_AI": BLACK_AI
+            "BLACK_AI": BLACK_AI,
+            "AI_DEPTH": AI_DEPTH
         }
         
         tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
         result = tinker_panel.run()
         
         if result:
-            white_drawback, black_drawback, updated_ai_settings = result
+            # Correctly unpack the 4 values returned from tinker_panel.run()
+            white_drawback, black_drawback, updated_ai_settings, options = result
             
             # Update AI control flags
             WHITE_AI = updated_ai_settings["WHITE_AI"]
             BLACK_AI = updated_ai_settings["BLACK_AI"]
+            AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
+            
+            # Handle flip board option
+            if options.get("FLIP_BOARD", False):
+                flipped = not flipped
+                print("Board flipped from tinker panel")
         
         # Reinitialize the main screen
         p.display.set_mode((WIDTH, HEIGHT))
