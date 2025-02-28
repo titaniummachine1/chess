@@ -3,6 +3,9 @@ import chess
 from GameState.movegen import DrawbackBoard
 import AI.evaluation as evaluation
 
+# Add a global transposition table.
+transposition_table = {}
+
 def score_move(board, move):
     """
     Simple move-ordering heuristic with king capture priority:
@@ -32,6 +35,13 @@ def negamax(board, depth, alpha, beta):
     Negamax with alpha-beta pruning and basic move-ordering.
     Correctly handles Drawback Chess where kings can be captured.
     """
+    # Transposition table check
+    board_key = board.fen()
+    if board_key in transposition_table:
+        stored_depth, stored_score = transposition_table[board_key]
+        if stored_depth >= depth:
+            return stored_score
+
     # Check if a king has been captured (game over)
     white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
                            for p in board.piece_map().values())
@@ -47,7 +57,8 @@ def negamax(board, depth, alpha, beta):
     # Base case for regular evaluation
     if depth == 0:
         eval_score = evaluation.evaluate(board)
-        print(f"Depth 0 evaluation: {eval_score}")
+        # Optionally comment out debug prints here.
+        # print(f"Depth 0 evaluation: {eval_score}")
         return eval_score
 
     max_score = -evaluation.Score.CHECKMATE.value
@@ -90,7 +101,10 @@ def negamax(board, depth, alpha, beta):
             # beta cutoff
             break
 
-    print(f"Depth {depth} max score: {max_score}")
+    # Store result in transposition table.
+    transposition_table[board_key] = (depth, max_score)
+    
+    # print(f"Depth {depth} max score: {max_score}")
     return max_score
 
 def best_move(board, depth) -> int:
