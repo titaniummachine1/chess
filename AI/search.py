@@ -27,18 +27,19 @@ def score_move(board, move):
         victim_value = evaluation.get_piece_value(board, captured_piece.piece_type, captured_piece.color)
         attacker_value = evaluation.get_piece_value(board, attacker.piece_type, attacker.color)
         return victim_value * 10 - attacker_value  # scaled so that big captures stand out
+    
     # Non-captures => 0
     return 0
 
 def negamax(board, depth, alpha, beta):
     """
     Negamax with alpha-beta pruning and basic move-ordering.
-    Correctly handles Drawback Chess where kings can be captured.
+    Uses push/pop to avoid expensive board copying.
     """
-    # Transposition table check
-    board_key = board.fen()
-    if board_key in transposition_table:
-        stored_depth, stored_score = transposition_table[board_key]
+    # Use a faster hashing key if available instead of board.fen()
+    key = board.transposition_key() if hasattr(board, "transposition_key") else board.fen()
+    if key in transposition_table:
+        stored_depth, stored_score = transposition_table[key]
         if stored_depth >= depth:
             return stored_score
 
@@ -48,18 +49,14 @@ def negamax(board, depth, alpha, beta):
     black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
                            for p in board.piece_map().values())
     
-    # If a king is captured, return the appropriate win/loss score
     if not white_king_alive:
         return -evaluation.Score.CHECKMATE.value  # Black wins
     if not black_king_alive:
         return evaluation.Score.CHECKMATE.value   # White wins
     
-    # Base case for regular evaluation
+    # Base case for evaluation
     if depth == 0:
-        eval_score = evaluation.evaluate(board)
-        # Optionally comment out debug prints here.
-        # print(f"Depth 0 evaluation: {eval_score}")
-        return eval_score
+        return evaluation.evaluate(board)
 
     max_score = -evaluation.Score.CHECKMATE.value
     
@@ -67,55 +64,38 @@ def negamax(board, depth, alpha, beta):
     for move in board.generate_legal_moves():
         captured = board.piece_at(move.to_square)
         if captured and captured.piece_type == chess.KING:
-            # Immediate king capture is a win
             return evaluation.Score.CHECKMATE.value
-    
-    # Get all legal moves
-    moves = list(board.generate_legal_moves())
 
+    moves = list(board.generate_legal_moves())
     if not moves:
-        # No legal moves, but in Drawback Chess this isn't necessarily a loss
-        # Return a very bad score but not immediate loss
         return -evaluation.Score.CHECKMATE.value // 2
 
-    # Sort moves by a simple heuristic: capture priority
-    # Higher score_move => earlier in list => improved pruning
     moves.sort(key=lambda mv: score_move(board, mv), reverse=True)
 
     for move in moves:
-        new_board = board.copy()
-        new_board.push(move)
-        
-        # Check for immediate win after our move
-        captured = board.piece_at(move.to_square)
-        if captured and captured.piece_type == chess.KING:
-            return evaluation.Score.CHECKMATE.value  # Immediate win
-
-        score = -negamax(new_board, depth - 1, -beta, -alpha)
+        board.push(move)
+        score = -negamax(board, depth - 1, -beta, -alpha)
+        board.pop()
 
         if score > max_score:
             max_score = score
 
         alpha = max(alpha, score)
         if alpha >= beta:
-            # beta cutoff
             break
 
-    # Store result in transposition table.
-    transposition_table[board_key] = (depth, max_score)
-    
-    # print(f"Depth {depth} max score: {max_score}")
+    transposition_table[key] = (depth, max_score)
     return max_score
 
 def best_move(board, depth) -> int:
     """
     Determines the best move using Negamax with alpha-beta and basic move-ordering.
     Prioritizes king captures in Drawback Chess.
+    Uses push/pop instead of copying the board for efficiency.
     """
     max_score = -evaluation.Score.CHECKMATE.value
     chosen_move = None
 
-    # Gather all legal moves
     moves = list(board.generate_legal_moves())
     
     if not moves:
@@ -129,16 +109,15 @@ def best_move(board, depth) -> int:
             print("AI finds king capture!")
             return move  # Immediately return the king capture move
     
-    # Sort moves for better pruning
     moves.sort(key=lambda mv: score_move(board, mv), reverse=True)
 
     alpha = -evaluation.Score.CHECKMATE.value
     beta = evaluation.Score.CHECKMATE.value
 
     for move in moves:
-        new_board = board.copy()
-        new_board.push(move)
-        score = -negamax(new_board, depth - 1, -beta, -alpha)
+        board.push(move)
+        score = -negamax(board, depth - 1, -beta, -alpha)
+        board.pop()
 
         if score > max_score:
             max_score = score
@@ -149,11 +128,8 @@ def best_move(board, depth) -> int:
             break
 
     if chosen_move is None:
-        # If we somehow have no best move but do have legal moves,
-        # just choose a random one to avoid crashes
-        if moves:
-            chosen_move = moves[0]
-            print(f"AI choosing random move {chosen_move}")
+        chosen_move = moves[0]
+        print(f"AI choosing random move {chosen_move}")
     else:
         print(f"AI chooses {chosen_move}, eval={max_score}")
 
