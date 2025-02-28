@@ -2,6 +2,8 @@
 import pygame as p
 import chess
 import random
+import asyncio
+
 from utils import load_images, draw_board, draw_pieces, draw_legal_move_indicators
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
@@ -18,10 +20,10 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Import AI sync functions
+# Import AI async functions
 try:
     from AI.search import best_move  # Legacy search if needed
-    from AI.async_search import sync_best_move, get_progress
+    from AI.async_search import start_search, get_progress, get_result, is_search_complete, reset_search
     HAS_AI = True
 except ImportError:
     print("Warning: AI module not available.")
@@ -130,26 +132,43 @@ def display_ai_status(screen, board):
     screen.blit(status_surf, status_rect)
     screen.blit(thinking_surf, thinking_rect)
 
-def ai_move(board):
+async def ai_move(board):
+    """Asynchronous AI move function"""
     global game_over, winner_color, ai_move_cooldown
     if not HAS_AI or game_over or board.is_variant_end():
         return False
-    print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
-    move = sync_best_move(board, AI_DEPTH)
+
+    # Check if a search is already in progress
+    if not is_search_complete():
+        await asyncio.sleep(0.1)  # Give time for search to progress
+        return False
+
+    # Get result if search is complete
+    move = get_result()
+    if move is None:
+        # Start new search if none is running
+        print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
+        start_search(board, AI_DEPTH)
+        return False
+
+    # Reset search state for next turn
+    reset_search()
+
     print(f"AI search returned: {move}")
     if move is None:
         legal_moves = list(board.legal_moves)
         if legal_moves:
             move = random.choice(legal_moves)
             print(f"No move from search; fallback move: {move}")
+
     if move and move in board.legal_moves:
         board.push(move)
         print(f"AI moved: {move}")
         print("Board FEN after AI move:", board.fen())
-        # Check if opponent has any legal moves remaining.
+        
         if not list(board.legal_moves):
             game_over = True
-            winner_color = board.turn  # Opponent cannot move: declare win for current side.
+            winner_color = board.turn
             print("No legal moves available for opponent; ending game.")
         if board.is_variant_end():
             game_over = True
@@ -161,7 +180,7 @@ def ai_move(board):
         print("AI move invalid; resetting state.")
         return False
 
-def main():
+async def async_main():
     global game_over, winner_color, WHITE_AI, BLACK_AI, flipped, ai_move_cooldown
     p.init()
     screen = p.display.set_mode((WIDTH, HEIGHT))
@@ -178,10 +197,8 @@ def main():
     game_over = False
     winner_color = None
 
-    if HAS_AI:
-        pass  # No reset state required for synchronous search.
-
     while running:
+        # Process pygame events and update game state
         for event in p.event.get():
             if event.type == p.QUIT:
                 running = False
@@ -243,9 +260,9 @@ def main():
                     
         if not game_over:
             if (BLACK_AI and board.turn == chess.BLACK) or (WHITE_AI and board.turn == chess.WHITE):
-                if ai_move(board):
-                    p.time.delay(100)
+                await ai_move(board)  # Changed to await the AI move function
                     
+        # Draw everything
         screen.fill(p.Color("black"))
         draw_board(screen, DIMENSION, BOARD_HEIGHT, BOARD_HEIGHT, flipped, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         draw_pieces(screen, board, flipped, DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
@@ -253,6 +270,7 @@ def main():
         display_current_turn(screen, board)
         draw_tinker_button(screen)
         display_ai_status(screen, board)
+        
         if selected_square is not None:
             square_size = BOARD_HEIGHT // DIMENSION
             r = chess.square_rank(selected_square)
@@ -266,7 +284,11 @@ def main():
             display_winner(screen, winner_color)
         clock.tick(FPS)
         p.display.flip()
+        
+        # Give more time for background tasks
+        await asyncio.sleep(0.01)
+    
     p.quit()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(async_main())
