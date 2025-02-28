@@ -104,29 +104,7 @@ class Searcher:
         base = score_move(board, move)
         killer_bonus = 5000 if move in self.killer_moves.get(depth, []) else 0
         history_bonus = self.history_table.get(move, 0)
-        
-        # Offensive bonus: encourage moves that approach enemy king.
-        enemy_color = not board.turn
-        enemy_king_sq = board.king(enemy_color)
-        if enemy_king_sq is not None and board.piece_at(move.from_square).piece_type != chess.KING:
-            # Use Manhattan distance for simplicity.
-            def manhattan(sq):
-                rank, file = divmod(sq, 8)  # Assuming 0-indexed squares in a standard 8x8 board.
-                return rank, file
-            from_rank, from_file = manhattan(move.from_square)
-            to_rank, to_file = manhattan(move.to_square)
-            king_rank, king_file = manhattan(enemy_king_sq)
-            old_distance = abs(from_rank - king_rank) + abs(from_file - king_file)
-            new_distance = abs(to_rank - king_rank) + abs(to_file - king_file)
-            if new_distance < old_distance:
-                offensive_bonus = (old_distance - new_distance) * 100  # Tune 100 as needed.
-            else:
-                offensive_bonus = 0
-        else:
-            offensive_bonus = 0
-        
-        return base + killer_bonus + history_bonus + offensive_bonus
-
+        return base + killer_bonus + history_bonus
 
     def quiescence(self, board, alpha, beta):
         stand_pat = eval_board(board)
