@@ -203,7 +203,19 @@ def main():
                                 selected_square = clicked_square
                                 print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
                         else:
-                            move = chess.Move(selected_square, clicked_square)
+                            # Check for pawn promotion candidate:
+                            pawn = board.piece_at(selected_square)
+                            if pawn and pawn.piece_type == chess.PAWN and (
+                                    (pawn.color == chess.WHITE and chess.square_rank(clicked_square)==7) or 
+                                    (pawn.color == chess.BLACK and chess.square_rank(clicked_square)==0)
+                                ):
+                                # Import and call promotion panel
+                                import promotion_panel
+                                promo = promotion_panel.run()
+                                move = chess.Move(selected_square, clicked_square, promotion=promo)
+                            else:
+                                move = chess.Move(selected_square, clicked_square)
+                            
                             if board.is_legal(move):
                                 board.push(move)
                                 print(f"Human moved: {move}")
