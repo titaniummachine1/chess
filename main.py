@@ -1,4 +1,3 @@
-##main.py do nto remove this comment you damn idiot
 import pygame as p
 import chess
 import random
@@ -48,6 +47,7 @@ WHITE_AI = False
 BLACK_AI = True
 ai_move_cooldown = 0
 tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
+search_in_progress = False
 AVAILABLE_DRAWBACKS = [
     "no_knight_moves",
     "no_bishop_captures",
@@ -132,56 +132,65 @@ def display_ai_status(screen, board):
     screen.blit(status_surf, status_rect)
     screen.blit(thinking_surf, thinking_rect)
 
-async def ai_move(board):
-    """Asynchronous AI move function"""
-    global game_over, winner_color, ai_move_cooldown
+def handle_ai_turn(board):
+    """Non-blocking AI turn handler that starts a search if needed,
+    or applies the move if search is complete"""
+    global game_over, winner_color, ai_move_cooldown, search_in_progress
+    
     if not HAS_AI or game_over or board.is_variant_end():
-        return False
-
-    # Check if a search is already in progress
-    if not is_search_complete():
-        await asyncio.sleep(0.1)  # Give time for search to progress
-        return False
-
-    # Get result if search is complete
-    move = get_result()
-    if move is None:
-        # Start new search if none is running
+        return
+    
+    # If AI's turn and no search is in progress, start one
+    if not search_in_progress:
         print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
         start_search(board, AI_DEPTH)
-        return False
-
-    # Reset search state for next turn
-    reset_search()
-
-    print(f"AI search returned: {move}")
-    if move is None:
-        legal_moves = list(board.legal_moves)
-        if legal_moves:
-            move = random.choice(legal_moves)
-            print(f"No move from search; fallback move: {move}")
-
-    if move and move in board.legal_moves:
-        board.push(move)
-        print(f"AI moved: {move}")
-        print("Board FEN after AI move:", board.fen())
+        search_in_progress = True
+        return
+    
+    # If a search is already in progress, check if it's done
+    if is_search_complete():
+        move = get_result()
+        if move is None:
+            # No good move found, pick a random legal move
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                move = random.choice(legal_moves)
+                print(f"No move from search; fallback move: {move}")
+            else:
+                # No legal moves available
+                game_over = True
+                winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
+                print("No legal moves available for AI; ending game.")
+                search_in_progress = False
+                reset_search()
+                return
         
-        if not list(board.legal_moves):
-            game_over = True
-            winner_color = board.turn
-            print("No legal moves available for opponent; ending game.")
-        if board.is_variant_end():
-            game_over = True
-            winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-            print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
-        ai_move_cooldown = FPS // 2
-        return True
-    else:
-        print("AI move invalid; resetting state.")
-        return False
+        # Apply the selected move
+        if move and move in board.legal_moves:
+            board.push(move)
+            print(f"AI moved: {move}")
+            print("Board FEN after AI move:", board.fen())
+            
+            if not list(board.legal_moves):
+                game_over = True
+                winner_color = board.turn
+                print("No legal moves available for opponent; ending game.")
+            
+            if board.is_variant_end():
+                game_over = True
+                winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
+                print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
+            
+            ai_move_cooldown = FPS // 2
+        else:
+            print("AI move invalid.")
+        
+        # Reset search state for next turn
+        search_in_progress = False
+        reset_search()
 
 async def async_main():
-    global game_over, winner_color, WHITE_AI, BLACK_AI, flipped, ai_move_cooldown
+    global game_over, winner_color, WHITE_AI, BLACK_AI, flipped, ai_move_cooldown, search_in_progress
     p.init()
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
@@ -196,6 +205,7 @@ async def async_main():
     selected_square = None
     game_over = False
     winner_color = None
+    search_in_progress = False
 
     while running:
         # Process pygame events and update game state
@@ -254,13 +264,15 @@ async def async_main():
                     selected_square = None
                     game_over = False
                     winner_color = None
+                    search_in_progress = False
                     print("Game restarted!")
                 elif event.key == p.K_t:
                     open_tinker_panel(board)
                     
+        # Handle AI turn - non-blocking approach
         if not game_over:
             if (BLACK_AI and board.turn == chess.BLACK) or (WHITE_AI and board.turn == chess.WHITE):
-                await ai_move(board)  # Changed to await the AI move function
+                handle_ai_turn(board)
                     
         # Draw everything
         screen.fill(p.Color("black"))
