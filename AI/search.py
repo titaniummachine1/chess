@@ -120,6 +120,7 @@ class Searcher:
         self.use_incremental_eval = use_incremental_eval
         self.killer_moves = {}    # key: depth -> list of moves causing beta cutoffs
         self.history_table = {}   # key: move -> heuristic score
+        self.search_board = None  # Internal board copy for search operations
 
     def move_ordering_score(self, board, move, depth):
         base = score_move(board, move)
@@ -228,6 +229,9 @@ class Searcher:
         return pv
 
     def search(self, board, max_depth=4):
+        # Create internal copy of the board for search operations
+        self.search_board = board.copy()
+        
         best_move_found = None
         prev_score = 0
         ASPIRATION_WINDOW = 50
@@ -238,7 +242,7 @@ class Searcher:
             upper = gamma + ASPIRATION_WINDOW
             iteration = 0
             while iteration < 20:
-                score = self.bound(board, gamma, depth)
+                score = self.bound(self.search_board, gamma, depth)
                 if score < lower:
                     gamma = score
                     lower = gamma - ASPIRATION_WINDOW
@@ -251,8 +255,8 @@ class Searcher:
             if iteration >= 20:
                 print(f"[Warning] Aspiration window failed to converge at depth {depth}; using last score.")
             prev_score = score
-            best_move_found = self.tp_move.get(get_transposition_key(board), None)
-            pv = self.get_principal_variation(board)
+            best_move_found = self.tp_move.get(get_transposition_key(self.search_board), None)
+            pv = self.get_principal_variation(self.search_board)
             if DEBUG:
                 print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
             else:
@@ -261,8 +265,10 @@ class Searcher:
 
 def best_move(board, depth) -> int:
     try:
+        # Always work with a copy of the board to avoid modifying the original
+        board_copy = board.copy()
         searcher = Searcher()
-        move = searcher.search(board, max_depth=depth)
+        move = searcher.search(board_copy, max_depth=depth)
     except Exception as e:
         print(f"Error during search: {e}")
         move = None
