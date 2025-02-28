@@ -11,29 +11,50 @@ DEBUG = False
 ###############################################################################
 # Zobrist Hashing
 ###############################################################################
-# Global Zobrist table: maps (square, piece_symbol) -> 64-bit random integer.
+
+# Global Zobrist table for pieces (square, symbol) -> 64-bit random integer.
 ZOBRIST_TABLE = {}
+
+# Precomputed random numbers for castling rights and en passant.
+ZOBRIST_CASTLING = { right: random.getrandbits(64) for right in "KQkq" }
+# For each of the 64 squares, a random number to be used if an en passant square exists.
+ZOBRIST_EP_64 = [random.getrandbits(64) for _ in range(64)]
+
+# Constants for turn: using fixed constants.
+ZOBRIST_WHITE_TURN = 0xF0F0F0F0F0F0F0F0
+ZOBRIST_BLACK_TURN = 0x0F0F0F0F0F0F0F0F
 
 def compute_zobrist_key(board):
     key = 0
-    # board.piece_map() should return a dict: square -> piece.
+    # Incorporate pieces.
     for square, piece in board.piece_map().items():
-        # Use piece.symbol() if available; else fallback to str(piece)
         symbol = piece.symbol() if hasattr(piece, "symbol") else str(piece)
         if (square, symbol) not in ZOBRIST_TABLE:
             ZOBRIST_TABLE[(square, symbol)] = random.getrandbits(64)
         key ^= ZOBRIST_TABLE[(square, symbol)]
+    # Incorporate turn.
+    key ^= ZOBRIST_WHITE_TURN if board.turn == chess.WHITE else ZOBRIST_BLACK_TURN
+    # Incorporate castling rights.
+    # (Assuming board.castling_xfen() returns a string like "KQkq" or "-" if none.)
+    castling = board.castling_xfen() if hasattr(board, "castling_xfen") else board.castling_xfen()
+    for char in castling:
+        if char in ZOBRIST_CASTLING:
+            key ^= ZOBRIST_CASTLING[char]
+    # Incorporate en passant square.
+    if board.ep_square is not None:
+        key ^= ZOBRIST_EP_64[board.ep_square]
     return key
 
 def get_transposition_key(board):
     """
     Returns a Zobrist hash key for the board.
-    If the board already provides a 'zobrist_key' attribute, use it.
-    Otherwise, compute it from the piece map.
+    If the board already has a 'zobrist_key' attribute, we assume it is up to date.
+    Otherwise, compute the key from scratch.
     """
     if hasattr(board, "zobrist_key"):
         return board.zobrist_key
     return compute_zobrist_key(board)
+
 
 ###############################################################################
 # Evaluation & Move Helpers
@@ -206,37 +227,45 @@ class Searcher:
                 break
         return pv
 
-    def search(self, board, max_depth=4):
-        best_move_found = None
-        prev_score = 0
-        ASPIRATION_WINDOW = 50
-        # Iterative deepening with aspiration windows.
-        for depth in range(1, max_depth + 1):
-            gamma = prev_score
-            lower = gamma - ASPIRATION_WINDOW
-            upper = gamma + ASPIRATION_WINDOW
-            while True:
-                score = self.bound(board, gamma, depth)
-                if score < lower:
-                    gamma = score
-                    lower = gamma - ASPIRATION_WINDOW
-                elif score > upper:
-                    gamma = score
-                    upper = gamma + ASPIRATION_WINDOW
+        def search(self, board, max_depth=4):
+            best_move_found = None
+            prev_score = 0
+            ASPIRATION_WINDOW = 50
+            # Iterative deepening with aspiration windows.
+            for depth in range(1, max_depth + 1):
+                gamma = prev_score
+                lower = gamma - ASPIRATION_WINDOW
+                upper = gamma + ASPIRATION_WINDOW
+                iteration = 0
+                while iteration < 20:  # Limit iterations to prevent infinite loops.
+                    score = self.bound(board, gamma, depth)
+                    if score < lower:
+                        gamma = score
+                        lower = gamma - ASPIRATION_WINDOW
+                    elif score > upper:
+                        gamma = score
+                        upper = gamma + ASPIRATION_WINDOW
+                    else:
+                        break
+                    iteration += 1
+                if iteration >= 20:
+                    print(f"[Warning] Aspiration window failed to converge at depth {depth}; using last score.")
+                prev_score = score
+                best_move_found = self.tp_move.get(get_transposition_key(board), None)
+                pv = self.get_principal_variation(board)
+                if DEBUG:
+                    print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
                 else:
-                    break
-            prev_score = score
-            best_move_found = self.tp_move.get(get_transposition_key(board), None)
-            pv = self.get_principal_variation(board)
-            if DEBUG:
-                print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
-            else:
-                print(f"Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
-        return best_move_found
+                    print(f"Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
+            return best_move_found
 
 def best_move(board, depth) -> int:
-    searcher = Searcher()
-    move = searcher.search(board, max_depth=depth)
+    try:
+        searcher = Searcher()
+        move = searcher.search(board, max_depth=depth)
+    except Exception as e:
+        print(f"Error during search: {e}")
+        move = None
     if move is None:
         moves = list(board.generate_legal_moves())
         if moves:

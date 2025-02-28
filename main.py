@@ -134,11 +134,23 @@ def ai_move(board):
     global game_over, winner_color, ai_move_cooldown
     if not HAS_AI or game_over or board.is_variant_end():
         return False
-    print(f"Starting synchronous AI search at depth {AI_DEPTH}")
+    print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
     move = sync_best_move(board, AI_DEPTH)
+    print(f"AI search returned: {move}")
+    if move is None:
+        legal_moves = list(board.legal_moves)
+        if legal_moves:
+            move = random.choice(legal_moves)
+            print(f"No move from search; fallback move: {move}")
     if move and move in board.legal_moves:
         board.push(move)
         print(f"AI moved: {move}")
+        print("Board FEN after AI move:", board.fen())
+        # Check if opponent has any legal moves remaining.
+        if not list(board.legal_moves):
+            game_over = True
+            winner_color = board.turn  # Opponent cannot move: declare win for current side.
+            print("No legal moves available for opponent; ending game.")
         if board.is_variant_end():
             game_over = True
             winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
@@ -147,7 +159,6 @@ def ai_move(board):
         return True
     else:
         print("AI move invalid; resetting state.")
-        # Optional: call reset function if needed.
         return False
 
 def main():
