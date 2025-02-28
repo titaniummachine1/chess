@@ -61,25 +61,30 @@ def evaluate(board):
     """
     Evaluates the board position considering:
     - Piece values (adjusted by drawbacks).
-    - King safety (recognizing captures as instant wins).
-    - Mobility (more moves = better position).
-    - Positional evaluation (encouraging good piece placement).
+    - King safety.
+    - Mobility.
+    - Positional evaluation.
+    - Drawback-specific adjustments.
     """
-
-    # If a king is missing, instantly return win/loss
+    # Early termination if a king is missing.
     white_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.WHITE for piece in board.piece_map().values())
     black_king_alive = any(piece.piece_type == chess.KING and piece.color == chess.BLACK for piece in board.piece_map().values())
+    if not black_king_alive:
+        return Score.CHECKMATE.value
+    if not white_king_alive:
+        return -Score.CHECKMATE.value
 
-    if not black_king_alive:  # White wins by capturing the Black king
-        return Score.CHECKMATE.value  # Maximum positive score
-    if not white_king_alive:  # Black wins by capturing the White king
-        return -Score.CHECKMATE.value  # Maximum negative score
-
-    # If the player has no legal moves, they lose
+    # If no legal moves, it's usually a losing position.
     if board.is_variant_loss():
         return -Score.CHECKMATE.value
 
-    return eval_pieces(board) + eval_moves(board) + eval_positional(board) + eval_drawback_specific(board)
+    # Adjusted evaluation: we now multiply king safety by an extra factor to penalize vulnerability.
+    king_safety_factor = 2  # Increase this factor to place greater importance on king safety.
+    return (eval_pieces(board)
+            + eval_moves(board)
+            + eval_positional(board)
+            + eval_drawback_specific(board)
+            + king_safety_factor * eval_king_safety(board))
 
 def get_piece_value(board, piece_type, color):
     """
@@ -268,3 +273,38 @@ def eval_drawback_specific(board):
                     score += queen_mobility * 2  # Each mobility square is worth 2 points
     
     return score
+
+def eval_king_safety(board):
+    """
+    Evaluates king safety by counting the number of friendly pawns around each king.
+    More friendly pawn cover yields a higher safety bonus.
+    This bonus is subtracted for the opponent.
+    """
+    safety_score = 0
+    offsets = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
+    for color in [chess.WHITE, chess.BLACK]:
+        king_sq = None
+        for square, piece in board.piece_map().items():
+            if piece.piece_type == chess.KING and piece.color == color:
+                king_sq = square
+                break
+        if king_sq is None:
+            continue  # Should be handled as terminal elsewhere.
+        pawn_cover = 0
+        king_file = chess.square_file(king_sq)
+        king_rank = chess.square_rank(king_sq)
+        for dx, dy in offsets:
+            new_file = king_file + dx
+            new_rank = king_rank + dy
+            if 0 <= new_file < 8 and 0 <= new_rank < 8:
+                sq = chess.square(new_file, new_rank)
+                neighbor = board.piece_at(sq)
+                if neighbor and neighbor.piece_type == chess.PAWN and neighbor.color == color:
+                    pawn_cover += 1
+        bonus = pawn_cover * 10  # Each pawn adds 10 points.
+        # Add bonus for the side whose turn it is; subtract for opponent.
+        if color == board.turn:
+            safety_score += bonus
+        else:
+            safety_score -= bonus
+    return safety_score

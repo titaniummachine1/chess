@@ -227,37 +227,37 @@ class Searcher:
                 break
         return pv
 
-        def search(self, board, max_depth=4):
-            best_move_found = None
-            prev_score = 0
-            ASPIRATION_WINDOW = 50
-            # Iterative deepening with aspiration windows.
-            for depth in range(1, max_depth + 1):
-                gamma = prev_score
-                lower = gamma - ASPIRATION_WINDOW
-                upper = gamma + ASPIRATION_WINDOW
-                iteration = 0
-                while iteration < 20:  # Limit iterations to prevent infinite loops.
-                    score = self.bound(board, gamma, depth)
-                    if score < lower:
-                        gamma = score
-                        lower = gamma - ASPIRATION_WINDOW
-                    elif score > upper:
-                        gamma = score
-                        upper = gamma + ASPIRATION_WINDOW
-                    else:
-                        break
-                    iteration += 1
-                if iteration >= 20:
-                    print(f"[Warning] Aspiration window failed to converge at depth {depth}; using last score.")
-                prev_score = score
-                best_move_found = self.tp_move.get(get_transposition_key(board), None)
-                pv = self.get_principal_variation(board)
-                if DEBUG:
-                    print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
+    def search(self, board, max_depth=4):
+        best_move_found = None
+        prev_score = 0
+        ASPIRATION_WINDOW = 50
+        # Iterative deepening with aspiration windows.
+        for depth in range(1, max_depth + 1):
+            gamma = prev_score
+            lower = gamma - ASPIRATION_WINDOW
+            upper = gamma + ASPIRATION_WINDOW
+            iteration = 0
+            while iteration < 20:
+                score = self.bound(board, gamma, depth)
+                if score < lower:
+                    gamma = score
+                    lower = gamma - ASPIRATION_WINDOW
+                elif score > upper:
+                    gamma = score
+                    upper = gamma + ASPIRATION_WINDOW
                 else:
-                    print(f"Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
-            return best_move_found
+                    break
+                iteration += 1
+            if iteration >= 20:
+                print(f"[Warning] Aspiration window failed to converge at depth {depth}; using last score.")
+            prev_score = score
+            best_move_found = self.tp_move.get(get_transposition_key(board), None)
+            pv = self.get_principal_variation(board)
+            if DEBUG:
+                print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
+            else:
+                print(f"Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
+        return best_move_found
 
 def best_move(board, depth) -> int:
     try:
