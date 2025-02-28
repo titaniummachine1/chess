@@ -23,7 +23,7 @@ except ImportError:
 # Import AI async functions
 try:
     from AI.search import best_move
-    from AI.async_search import async_best_move, is_thinking, is_search_complete, get_best_move, reset_ai_state
+    from AI.async_search import async_best_move, is_thinking, is_search_complete, get_best_move, reset_ai_state, get_progress
     HAS_AI = True
 except ImportError:
     print("Warning: AI module not available.")
