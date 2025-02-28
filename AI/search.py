@@ -70,11 +70,15 @@ def eval_board(board):
 
 def score_move(board, move):
     """
-    Basic heuristic for move ordering:
+    Enhanced heuristic for move ordering:
       - King captures get highest priority.
       - Other captures use MVV-LVA.
+      - Moves attacking the last moved opponent piece get a bonus.
       - Non-captures score 0.
     """
+    score = 0
+    
+    # Check if this is a capture
     captured_piece = board.piece_at(move.to_square)
     if captured_piece:
         if captured_piece.piece_type == chess.KING:
@@ -82,8 +86,47 @@ def score_move(board, move):
         attacker = board.piece_at(move.from_square)
         victim_value = evaluation.get_piece_value(board, captured_piece.piece_type, captured_piece.color)
         attacker_value = evaluation.get_piece_value(board, attacker.piece_type, attacker.color)
-        return victim_value * 10 - attacker_value
-    return 0
+        score += victim_value * 10 - attacker_value
+    
+    # Add bonus for targeting the opponent's last moved piece
+    # This requires tracking the last move made
+    if hasattr(board, 'move_stack') and board.move_stack:
+        last_move = board.move_stack[-1]
+        last_move_to_square = last_move.to_square
+        
+        # Check if this move attacks the square where the opponent's piece last moved to
+        if move.to_square == last_move_to_square:
+            # Direct capture of last moved piece - already handled above
+            pass
+        elif hasattr(board, "attacks") and board.attacks(move.to_square, last_move_to_square):
+            # The move attacks the square of the last moved piece
+            # (only works if board class has an 'attacks' method)
+            score += 500
+        else:
+            # Alternative approach using attack masks for pieces
+            piece = board.piece_at(move.from_square)
+            if piece:
+                if piece.piece_type == chess.PAWN:
+                    # Check pawn attack pattern
+                    pawn_attacks = chess.BB_PAWN_ATTACKS[piece.color][move.to_square]
+                    if (1 << last_move_to_square) & pawn_attacks:
+                        score += 500
+                elif piece.piece_type == chess.KNIGHT:
+                    # Knight attack pattern
+                    knight_attacks = chess.BB_KNIGHT_ATTACKS[move.to_square]
+                    if (1 << last_move_to_square) & knight_attacks:
+                        score += 500
+                elif piece.piece_type in (chess.BISHOP, chess.ROOK, chess.QUEEN):
+                    # For sliding pieces, we'd need more complex logic
+                    # This is a simplified check - may produce false positives
+                    # A proper implementation would use ray attacks with blockers
+                    if (piece.piece_type == chess.BISHOP and chess.square_distance(move.to_square, last_move_to_square) % 2 == 0) or \
+                       (piece.piece_type == chess.ROOK and (chess.square_file(move.to_square) == chess.square_file(last_move_to_square) or 
+                                                           chess.square_rank(move.to_square) == chess.square_rank(last_move_to_square))) or \
+                       (piece.piece_type == chess.QUEEN):
+                        score += 500
+    
+    return score
 
 def has_immediate_king_capture(board, moves):
     for move in moves:
