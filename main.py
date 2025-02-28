@@ -2,7 +2,7 @@
 import pygame as p
 import chess
 import random
-import asyncio  # For letting async tasks run briefly each frame
+#from asyncio import sleep  # No longer needed
 from utils import load_images, draw_board, draw_pieces, draw_legal_move_indicators
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
@@ -20,10 +20,10 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Import AI async functions
+# Import AI sync functions (no asyncio)
 try:
     from AI.search import best_move
-    from AI.async_search import async_best_move, is_thinking, is_search_complete, get_best_move, reset_ai_state, get_progress
+    from AI.async_search import sync_best_move, reset_ai_state, get_best_move, get_progress, is_search_complete
     HAS_AI = True
 except ImportError:
     print("Warning: AI module not available.")
@@ -126,7 +126,7 @@ def open_tinker_panel(board):
         print("Tinker Panel not available.")
 
 def display_ai_status(screen, board):
-    if not HAS_AI or not is_thinking():
+    if not HAS_AI:
         return
     font = p.font.SysFont(None, 20)
     player_color = "White" if board.turn == chess.WHITE else "Black"
@@ -143,33 +143,22 @@ def ai_move(board):
     global game_over, winner_color, ai_move_cooldown
     if not HAS_AI or game_over or board.is_variant_end():
         return False
-    if is_thinking():
-        if is_search_complete():
-            move = get_best_move()
-            print(f"AI completed search; move: {move}")
-            if move and move in board.legal_moves:
-                board.push(move)
-                print(f"AI moved: {move}")
-                if board.is_variant_end():
-                    game_over = True
-                    winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                    print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
-                reset_ai_state()
-                ai_move_cooldown = FPS // 2
-                return True
-            else:
-                print("AI move invalid; resetting")
-                reset_ai_state()
+    # Synchronously compute the best move (this will block the game loop)
+    print(f"Starting synchronous AI search at depth {AI_DEPTH}")
+    move = sync_best_move(board, AI_DEPTH)
+    if move and move in board.legal_moves:
+        board.push(move)
+        print(f"AI moved: {move}")
+        if board.is_variant_end():
+            game_over = True
+            winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
+            print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
+        ai_move_cooldown = FPS // 2
+        return True
+    else:
+        print("AI move invalid; resetting state.")
+        reset_ai_state()
         return False
-    if ai_move_cooldown > 0:
-        ai_move_cooldown -= 1
-        return False
-    if ((WHITE_AI and board.turn == chess.WHITE) or (BLACK_AI and board.turn == chess.BLACK)):
-        print(f"Starting AI search at depth {AI_DEPTH}")
-        success = async_best_move(board, AI_DEPTH)
-        if not success:
-            p.time.delay(50)
-    return False
 
 def main():
     global game_over, winner_color, WHITE_AI, BLACK_AI, flipped, ai_move_cooldown
@@ -178,10 +167,7 @@ def main():
     clock = p.time.Clock()
     p.display.set_caption("Drawback Chess")
 
-    # Create and set a new asyncio event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
+    # No asyncio event loop is needed since search is synchronous.
     ai_move_cooldown = 0
     board = DrawbackBoard()
     assign_random_drawbacks(board)
@@ -201,7 +187,7 @@ def main():
                 running = False
             elif event.type == p.MOUSEBUTTONDOWN:
                 x, y = event.pos
-                if tinker_button_rect.collidepoint(x,y):
+                if tinker_button_rect.collidepoint(x, y):
                     open_tinker_panel(board)
                     continue
                 if not game_over and not ((WHITE_AI and board.turn == chess.WHITE) or (BLACK_AI and board.turn == chess.BLACK)):
@@ -245,8 +231,6 @@ def main():
                 elif event.key == p.K_t:
                     open_tinker_panel(board)
 
-        loop.run_until_complete(asyncio.sleep(0))
-
         if not game_over:
             move_made = False
             if (BLACK_AI and board.turn == chess.BLACK) or (WHITE_AI and board.turn == chess.WHITE):
@@ -266,7 +250,7 @@ def main():
             col = chess.square_file(selected_square)
             draw_row, draw_col = (row, 7 - col) if flipped else (7 - row, col)
             highlight = p.Surface((square_size, square_size), p.SRCALPHA)
-            highlight.fill((255,255,0,100))
+            highlight.fill((255, 255, 0, 100))
             screen.blit(highlight, (BOARD_X_OFFSET + draw_col * square_size, BOARD_Y_OFFSET + draw_row * square_size))
             draw_legal_move_indicators(screen, board, selected_square, flipped, DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         if game_over and winner_color is not None:
