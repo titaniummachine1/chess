@@ -2,12 +2,10 @@
 import pygame as p
 import chess
 import random
-#from asyncio import sleep  # No longer needed
 from utils import load_images, draw_board, draw_pieces, draw_legal_move_indicators
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
 
-# Set BOARD_HEIGHT in utils for consistent square sizing
 import utils
 BOARD_HEIGHT = 640  # Actual board height
 utils.BOARD_HEIGHT = BOARD_HEIGHT
@@ -20,10 +18,10 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Import AI sync functions (no asyncio)
+# Import AI sync functions
 try:
-    from AI.search import best_move
-    from AI.async_search import sync_best_move, reset_ai_state, get_best_move, get_progress, is_search_complete
+    from AI.search import best_move  # Legacy search if needed
+    from AI.async_search import sync_best_move, get_progress
     HAS_AI = True
 except ImportError:
     print("Warning: AI module not available.")
@@ -38,23 +36,16 @@ BOARD_X_OFFSET = 80
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
 FPS = 60
-AI_DEPTH = 3
+AI_DEPTH = 4
 
 # Global state
 game_over = False
 winner_color = None
 flipped = False
-
-# AI control flags (if AI is enabled)
 WHITE_AI = False
 BLACK_AI = True
-
-# Cooldown to delay successive AI moves
 ai_move_cooldown = 0
-
-# Tinker Panel button rect
 tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
-
 AVAILABLE_DRAWBACKS = [
     "no_knight_moves",
     "no_bishop_captures",
@@ -143,7 +134,6 @@ def ai_move(board):
     global game_over, winner_color, ai_move_cooldown
     if not HAS_AI or game_over or board.is_variant_end():
         return False
-    # Synchronously compute the best move (this will block the game loop)
     print(f"Starting synchronous AI search at depth {AI_DEPTH}")
     move = sync_best_move(board, AI_DEPTH)
     if move and move in board.legal_moves:
@@ -157,7 +147,7 @@ def ai_move(board):
         return True
     else:
         print("AI move invalid; resetting state.")
-        reset_ai_state()
+        # Optional: call reset function if needed.
         return False
 
 def main():
@@ -166,8 +156,7 @@ def main():
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
     p.display.set_caption("Drawback Chess")
-
-    # No asyncio event loop is needed since search is synchronous.
+    
     ai_move_cooldown = 0
     board = DrawbackBoard()
     assign_random_drawbacks(board)
@@ -179,7 +168,7 @@ def main():
     winner_color = None
 
     if HAS_AI:
-        reset_ai_state()
+        pass  # No reset state required for synchronous search.
 
     while running:
         for event in p.event.get():
@@ -203,22 +192,20 @@ def main():
                                 selected_square = clicked_square
                                 print(f"Selected {piece.symbol()} at {chess.square_name(clicked_square)}")
                         else:
-                            # Check for pawn promotion candidate:
                             pawn = board.piece_at(selected_square)
                             if pawn and pawn.piece_type == chess.PAWN and (
-                                    (pawn.color == chess.WHITE and chess.square_rank(clicked_square)==7) or 
-                                    (pawn.color == chess.BLACK and chess.square_rank(clicked_square)==0)
-                                ):
-                                # Import and call promotion panel
+                                (pawn.color == chess.WHITE and chess.square_rank(clicked_square) == 7) or
+                                (pawn.color == chess.BLACK and chess.square_rank(clicked_square) == 0)
+                            ):
                                 import promotion_panel
                                 promo = promotion_panel.run()
-                                move = chess.Move(selected_square, clicked_square, promotion=promo)
+                                move_obj = chess.Move(selected_square, clicked_square, promotion=promo)
                             else:
-                                move = chess.Move(selected_square, clicked_square)
+                                move_obj = chess.Move(selected_square, clicked_square)
                             
-                            if board.is_legal(move):
-                                board.push(move)
-                                print(f"Human moved: {move}")
+                            if board.is_legal(move_obj):
+                                board.push(move_obj)
+                                print(f"Human moved: {move_obj}")
                                 selected_square = None
                                 if board.is_variant_end():
                                     winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
@@ -242,13 +229,12 @@ def main():
                     print("Game restarted!")
                 elif event.key == p.K_t:
                     open_tinker_panel(board)
-
+                    
         if not game_over:
-            move_made = False
             if (BLACK_AI and board.turn == chess.BLACK) or (WHITE_AI and board.turn == chess.WHITE):
-                move_made = ai_move(board)
-                if move_made:
+                if ai_move(board):
                     p.time.delay(100)
+                    
         screen.fill(p.Color("black"))
         draw_board(screen, DIMENSION, BOARD_HEIGHT, BOARD_HEIGHT, flipped, BOARD_Y_OFFSET, BOARD_X_OFFSET)
         draw_pieces(screen, board, flipped, DIMENSION, BOARD_Y_OFFSET, BOARD_X_OFFSET)
@@ -258,9 +244,9 @@ def main():
         display_ai_status(screen, board)
         if selected_square is not None:
             square_size = BOARD_HEIGHT // DIMENSION
-            row = chess.square_rank(selected_square)
-            col = chess.square_file(selected_square)
-            draw_row, draw_col = (row, 7 - col) if flipped else (7 - row, col)
+            r = chess.square_rank(selected_square)
+            c = chess.square_file(selected_square)
+            draw_row, draw_col = (r, 7 - c) if flipped else (7 - r, c)
             highlight = p.Surface((square_size, square_size), p.SRCALPHA)
             highlight.fill((255, 255, 0, 100))
             screen.blit(highlight, (BOARD_X_OFFSET + draw_col * square_size, BOARD_Y_OFFSET + draw_row * square_size))

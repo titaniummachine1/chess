@@ -2,135 +2,221 @@ import numpy as np
 import chess
 from GameState.movegen import DrawbackBoard
 import AI.evaluation as evaluation
+from collections import namedtuple
 
-# Add a global transposition table.
-transposition_table = {}
+# Debug flag for verbose output; set to True to see PV details.
+DEBUG = False
+
+###############################################################################
+# Helper Functions (Modular, Replaceable)
+###############################################################################
+
+def get_transposition_key(board):
+    """
+    Returns a key for the transposition table.
+    Checks for a dedicated Zobrist hash if available, otherwise falls back.
+    """
+    if hasattr(board, "zobrist_key"):
+        return board.zobrist_key
+    return board.transposition_key() if hasattr(board, "transposition_key") else board.fen()
+
+def eval_board(board):
+    """
+    Evaluates the board.
+    If the board supports incremental evaluation, that method is used; otherwise,
+    the standard evaluation function is called.
+    """
+    if hasattr(board, "incremental_evaluate"):
+        return board.incremental_evaluate()
+    return evaluation.evaluate(board)
 
 def score_move(board, move):
     """
-    Simple move-ordering heuristic with king capture priority:
-    1. King captures are always preferred (highest priority)
-    2. Other captures based on MVV-LVA (Most Valuable Victim - Least Valuable Aggressor)
-    3. Non-captures have lowest priority
+    Heuristic for move ordering:
+      1. King captures are highest priority.
+      2. Other captures use MVV-LVA.
+      3. Non-captures get a base score of 0.
     """
     captured_piece = board.piece_at(move.to_square)
-    
-    # If capturing the king, give it maximum priority
-    if captured_piece and captured_piece.piece_type == chess.KING:
-        return 1000000  # Extremely high priority for king capture
-    
     if captured_piece:
+        if captured_piece.piece_type == chess.KING:
+            return 1000000  # Maximum score for king capture
         attacker = board.piece_at(move.from_square)
-        # MVV-LVA approach:
-        # capturedValue - (1/10)*attackerValue
-        # This tries to encourage big captures and cheap attackers.
         victim_value = evaluation.get_piece_value(board, captured_piece.piece_type, captured_piece.color)
         attacker_value = evaluation.get_piece_value(board, attacker.piece_type, attacker.color)
-        return victim_value * 10 - attacker_value  # scaled so that big captures stand out
-    
-    # Non-captures => 0
+        return victim_value * 10 - attacker_value
     return 0
 
-def negamax(board, depth, alpha, beta):
+def has_immediate_king_capture(board, moves):
     """
-    Negamax with alpha-beta pruning and basic move-ordering.
-    Uses push/pop to avoid expensive board copying.
+    Returns True if any move in moves captures a king.
     """
-    # Use a faster hashing key if available instead of board.fen()
-    key = board.transposition_key() if hasattr(board, "transposition_key") else board.fen()
-    if key in transposition_table:
-        stored_depth, stored_score = transposition_table[key]
-        if stored_depth >= depth:
-            return stored_score
-
-    # Check if a king has been captured (game over)
-    white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
-                           for p in board.piece_map().values())
-    black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
-                           for p in board.piece_map().values())
-    
-    if not white_king_alive:
-        return -evaluation.Score.CHECKMATE.value  # Black wins
-    if not black_king_alive:
-        return evaluation.Score.CHECKMATE.value   # White wins
-    
-    # Base case for evaluation
-    if depth == 0:
-        return evaluation.evaluate(board)
-
-    max_score = -evaluation.Score.CHECKMATE.value
-    
-    # First check for immediate king captures
-    for move in board.generate_legal_moves():
+    for move in moves:
         captured = board.piece_at(move.to_square)
         if captured and captured.piece_type == chess.KING:
+            return True
+    return False
+
+def is_game_over(board):
+    """
+    Checks if either king is missing.
+    """
+    pieces = board.piece_map().values()
+    white_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE for p in pieces)
+    black_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK for p in pieces)
+    if not white_alive:
+        return -evaluation.Score.CHECKMATE.value  # Black wins
+    if not black_alive:
+        return evaluation.Score.CHECKMATE.value   # White wins
+    return None
+
+def is_capture(board, move):
+    """
+    Returns True if the move is a capture (including en passant, if applicable).
+    """
+    return board.piece_at(move.to_square) is not None
+
+###############################################################################
+# Updated Search Methods: Sunfish-Style Iterative Deepening (MTD-bi) with PV & LMR
+###############################################################################
+
+# Constants analogous to Sunfish's values.
+MATE_UPPER = evaluation.Score.CHECKMATE.value
+MATE_LOWER = evaluation.Score.CHECKMATE.value  # (Assuming mate scores are symmetric)
+QS = 40       # Quiescence threshold value
+QS_A = 140    # Adjustment factor for quiescence pruning
+EVAL_ROUGHNESS = 15  # Tolerance for iterative deepening convergence
+
+# Transposition table entry.
+Entry = namedtuple("Entry", "lower upper")
+
+class Searcher:
+    def __init__(self, use_incremental_eval=False):
+        # Local transposition table: key = get_transposition_key(board) + ":" + depth
+        self.tp_score = {}
+        # Cache best moves: key = board's transposition key, value = best move found
+        self.tp_move = {}
+        self.nodes = 0
+        self.use_incremental_eval = use_incremental_eval
+
+    def bound(self, board, gamma, depth):
+        """
+        Recursively search for a bound on board's score.
+        Returns a score r such that:
+          if r < gamma then r is an upper bound,
+          if r >= gamma then r is a lower bound.
+        Incorporates LMR: for moves after the first two that are not captures, 
+        the search depth is reduced by 1.
+        """
+        self.nodes += 1
+
+        # Terminal check: if a king is missing or evaluation stops the search.
+        result = is_game_over(board)
+        if result is not None:
+            return result
+        if depth == 0:
+            return eval_board(board)
+
+        key = get_transposition_key(board) + f":{depth}"
+        entry = self.tp_score.get(key, Entry(-MATE_UPPER, MATE_UPPER))
+        if entry.lower >= gamma:
+            return entry.lower
+        if entry.upper < gamma:
+            return entry.upper
+
+        moves = list(board.generate_legal_moves())
+        if not moves:
+            return -evaluation.Score.CHECKMATE.value // 2
+
+        # Early exit: if any move can capture the king.
+        if has_immediate_king_capture(board, moves):
             return evaluation.Score.CHECKMATE.value
 
-    moves = list(board.generate_legal_moves())
-    if not moves:
-        return -evaluation.Score.CHECKMATE.value // 2
+        # Order moves for better pruning.
+        moves.sort(key=lambda m: score_move(board, m), reverse=True)
 
-    moves.sort(key=lambda mv: score_move(board, mv), reverse=True)
+        best = -MATE_UPPER
+        for i, move in enumerate(moves):
+            # Apply Late Move Reductions (LMR):
+            reduction = 0
+            # For moves beyond the first two, if not a capture and depth is sufficient,
+            # reduce depth by 1.
+            if i >= 2 and depth >= 3 and not is_capture(board, move):
+                reduction = 1
 
-    for move in moves:
-        board.push(move)
-        score = -negamax(board, depth - 1, -beta, -alpha)
-        board.pop()
+            board.push(move)
+            score = -self.bound(board, 1 - gamma, depth - 1 - reduction)
+            board.pop()
 
-        if score > max_score:
-            max_score = score
+            best = max(best, score)
+            if best >= gamma:
+                # Cache the move that caused the beta-cutoff.
+                self.tp_move[get_transposition_key(board)] = move
+                break
 
-        alpha = max(alpha, score)
-        if alpha >= beta:
-            break
+        if best >= gamma:
+            self.tp_score[key] = Entry(best, entry.upper)
+        else:
+            self.tp_score[key] = Entry(entry.lower, best)
+        return best
 
-    transposition_table[key] = (depth, max_score)
-    return max_score
+    def get_principal_variation(self, board, max_length=10):
+        """
+        Reconstructs the principal variation (PV) from cached best moves.
+        Returns a list of moves representing the PV.
+        """
+        pv = []
+        local_board = board.copy()
+        while True:
+            key = get_transposition_key(local_board)
+            if key not in self.tp_move:
+                break
+            move = self.tp_move[key]
+            pv.append(move)
+            local_board.push(move)
+            if len(pv) >= max_length:
+                break
+        return pv
+
+    def search(self, board, max_depth=4):
+        """
+        Iterative deepening MTD-bi search with principal variation.
+        Yields a tuple (depth, gamma, score, best_move, principal_variation)
+        for each depth iteration. Returns the best move found.
+        """
+        best_move_found = None
+        gamma = 0
+        for depth in range(1, max_depth + 1):
+            lower, upper = -MATE_UPPER, MATE_UPPER
+            while lower < upper - EVAL_ROUGHNESS:
+                score = self.bound(board, gamma, depth)
+                if score >= gamma:
+                    lower = score
+                else:
+                    upper = score
+                gamma = (lower + upper + 1) // 2
+            best_move_found = self.tp_move.get(get_transposition_key(board), None)
+            pv = self.get_principal_variation(board)
+            if DEBUG:
+                print(f"[DEBUG] Depth: {depth}, Score: {lower}, Best move: {best_move_found}, PV: {pv}")
+            else:
+                print(f"Depth: {depth}, Score: {lower}, Best move: {best_move_found}, PV: {pv}")
+        return best_move_found
 
 def best_move(board, depth) -> int:
     """
-    Determines the best move using Negamax with alpha-beta and basic move-ordering.
-    Prioritizes king captures in Drawback Chess.
-    Uses push/pop instead of copying the board for efficiency.
+    Determines the best move using the updated Searcher (MTD-bi iterative deepening),
+    with principal variation extraction and late move reductions.
     """
-    max_score = -evaluation.Score.CHECKMATE.value
-    chosen_move = None
-
-    moves = list(board.generate_legal_moves())
-    
-    if not moves:
-        print("AI has no legal moves.")
-        return None
-    
-    # Check for immediate king captures
-    for move in moves:
-        captured_piece = board.piece_at(move.to_square)
-        if captured_piece and captured_piece.piece_type == chess.KING:
-            print("AI finds king capture!")
-            return move  # Immediately return the king capture move
-    
-    moves.sort(key=lambda mv: score_move(board, mv), reverse=True)
-
-    alpha = -evaluation.Score.CHECKMATE.value
-    beta = evaluation.Score.CHECKMATE.value
-
-    for move in moves:
-        board.push(move)
-        score = -negamax(board, depth - 1, -beta, -alpha)
-        board.pop()
-
-        if score > max_score:
-            max_score = score
-            chosen_move = move
-
-        alpha = max(alpha, score)
-        if alpha >= beta:
-            break
-
-    if chosen_move is None:
-        chosen_move = moves[0]
-        print(f"AI choosing random move {chosen_move}")
+    searcher = Searcher()
+    move = searcher.search(board, max_depth=depth)
+    if move is None:
+        moves = list(board.generate_legal_moves())
+        if moves:
+            move = moves[0]
+            print(f"AI choosing fallback move: {move}")
+        else:
+            print("AI has no legal moves.")
     else:
-        print(f"AI chooses {chosen_move}, eval={max_score}")
-
-    return chosen_move
+        print(f"AI chooses {move}")
+    return move
