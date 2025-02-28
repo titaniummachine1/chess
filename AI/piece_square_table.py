@@ -1,25 +1,28 @@
-# Piece values in centipawns for midgame and endgame (for reference)
-piece_values = {
-    'P': (94, 100),   # Pawn
-    'N': (337, 281),  # Knight
-    'B': (365, 297),  # Bishop
-    'R': (479, 512),  # Rook
-    'Q': (1025, 929), # Queen
-    'K': (10000, 10000)  # King
+# AI/piece_square_table.py
+import chess
+
+# Base piece values as tuples: (midgame, endgame)
+PIECE_VALUES = {
+    'P': (94, 100),
+    'N': (337, 281),
+    'B': (365, 297),
+    'R': (479, 512),
+    'Q': (1025, 929),
+    'K': (10000, 10000)  # King’s base is fixed; positional bonus is added later.
 }
 
-# Midgame piece-square tables: lists of 64 values (from White's perspective)
+# Midgame piece–square tables (white perspective), 64 values each.
 piece_square_tables = {
     "mg": {
         "P": [
-             0,   0,   0,   0,   0,   0,   0,   0,
-            50,  50,  50,  50,  50,  50,  50,  50,
-            10,  10,  20,  30,  30,  20,  10,  10,
-             5,   5,  10,  25,  25,  10,   5,   5,
-             0,   0,   0,  20,  20,   0,   0,   0,
-             5,  -5, -10,   0,   0, -10,  -5,   5,
-             5,  10,  10, -20, -20,  10,  10,   5,
-             0,   0,   0,   0,   0,   0,   0,   0
+              0,   0,   0,   0,   0,   0,   0,   0,
+             50,  50,  50,  50,  50,  50,  50,  50,
+             10,  10,  20,  30,  30,  20,  10,  10,
+              5,   5,  10,  25,  25,  10,   5,   5,
+              0,   0,   0,  20,  20,   0,   0,   0,
+              5,  -5, -10,   0,   0, -10,  -5,   5,
+              5,  10,  10, -20, -20,  10,  10,   5,
+              0,   0,   0,   0,   0,   0,   0,   0
         ],
         "N": [
             -50, -40, -30, -30, -30, -30, -40, -50,
@@ -62,13 +65,13 @@ piece_square_tables = {
             -20, -10, -10,  -5,  -5, -10, -10, -20
         ],
         "K": [
-            -80, -70, -70, -70, -70, -70, -70, -80, 
-            -60, -60, -60, -60, -60, -60, -60, -60, 
-            -40, -50, -50, -60, -60, -50, -50, -40, 
-            -30, -40, -40, -50, -50, -40, -40, -30, 
-            -20, -30, -30, -40, -40, -30, -30, -20, 
-            -10, -20, -20, -20, -20, -20, -20, -10, 
-             20,  20,  -5,  -5,  -5,  -5,  20,  20, 
+            -80, -70, -70, -70, -70, -70, -70, -80,
+            -60, -60, -60, -60, -60, -60, -60, -60,
+            -40, -50, -50, -60, -60, -50, -50, -40,
+            -30, -40, -40, -50, -50, -40, -40, -30,
+            -20, -30, -30, -40, -40, -30, -30, -20,
+            -10, -20, -20, -20, -20, -20, -20, -10,
+             20,  20,  -5,  -5,  -5,  -5,  20,  20,
              20,  30,  10,   0,   0,  10,  30,  20
         ]
     },
@@ -124,26 +127,27 @@ piece_square_tables = {
             -20, -10, -10,  -5,  -5, -10, -10, -20
         ],
         "K": [
-            -20, -10, -10, -10, -10, -10, -10, -20,
-             -5,   0,   5,   5,   5,   5,   0,  -5,
-            -10,  -5,  20,  30,  30,  20,  -5, -10,
-            -15, -10,  35,  45,  45,  35, -10, -15,
-            -20, -15,  30,  40,  40,  30, -15, -20,
-            -25, -20,  20,  25,  25,  20, -20, -25,
-            -30, -25,   0,   0,   0,   0, -25, -30,
+            -50, -30, -30, -30, -30, -30, -30, -50,
+            -30, -20, -20, -20, -20, -20, -20, -30,
+            -30, -10,   0,   0,   0,   0, -10, -30,
+            -30, -10,   0,  10,  10,   0, -10, -30,
+            -30, -10,   0,  10,  10,   0, -10, -30,
+            -30, -10,   0,   0,   0,   0, -10, -30,
+            -30, -20, -20, -20, -20, -20, -20, -30,
             -50, -30, -30, -30, -30, -30, -30, -50
         ]
     }
 }
 
-# New helper to flip a table (list of 64 values)
+###############################################################################
+# Piece-Square Table Interpolation Module
+###############################################################################
+
 def flip_table_for_black(table):
-    # Split into 8 rows, reverse the row order, and flatten back
     rows = [table[i*8:(i+1)*8] for i in range(8)]
     rows.reverse()
     return [val for row in rows for val in row]
 
-# Build flipped tables for Black using the new helper:
 flipped_piece_square_tables = {
     "mg": {piece: flip_table_for_black(piece_square_tables["mg"][piece])
            for piece in piece_square_tables["mg"]},
@@ -162,11 +166,6 @@ piece_phase = {
 }
 
 def compute_game_phase(board):
-    """
-    Compute the game phase as a fraction between 0 (endgame) and 1 (midgame)
-    based on the material (non-king pieces) remaining.
-    In the starting position, the phase sum is 24.
-    """
     phase = 0
     for square, piece in board.piece_map().items():
         symbol = piece.symbol().upper()
@@ -174,18 +173,11 @@ def compute_game_phase(board):
             phase += piece_phase[symbol]
     max_phase = 24.0
     phase = min(phase, max_phase)
-    # Return a fraction: 1 for full midgame, 0 for endgame.
     return phase / max_phase
 
 def interpolate_piece_square(piece, square, color, board):
-    """
-    Returns an interpolated piece-square value based on the game phase.
-    Expects 'piece' to be a string like 'P', 'N', etc.
-    'square' should be an integer index (0-63).
-    """
     phase_factor = compute_game_phase(board)
-    key = piece.upper()  # Ensure uppercase key.
-    # Use default table of 64 zeros if key not found.
+    key = piece.upper()
     if color == chess.WHITE:
         mg = piece_square_tables["mg"].get(key, [0]*64)[square]
         eg = piece_square_tables["eg"].get(key, [0]*64)[square]
