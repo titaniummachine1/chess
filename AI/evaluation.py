@@ -145,7 +145,6 @@ def evaluate(board):
         pos_bonus = pst.interpolate_piece_square(mapping[piece.piece_type], square, piece.color, board)
         positional += pos_bonus if piece.color == chess.WHITE else -pos_bonus
 
-    # Remove the 0.5 weight to add full piece-square bonus.
     return material + mobility + safety + positional
 
 # Fallback transposition key helper for search use.

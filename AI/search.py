@@ -4,6 +4,7 @@ from AI import evaluation  # now evaluation handles both material & positional e
 from AI import piece_square_table as piece_square_table
 from collections import namedtuple
 import random
+from time import time  # NEW import
 
 DEBUG = False
 
@@ -82,25 +83,71 @@ def eval_board(board):
 
 def development_bonus(board, move):
     """
-    Award a bonus for moves that develop a piece into the center.
-    Applies to knights and bishops.
+    Award a bonus for moves that develop a bishop into the center.
+    Knights no longer receive this bonus.
     """
     piece = board.piece_at(move.from_square)
     if piece is None:
         return 0
-    if piece.piece_type not in (chess.KNIGHT, chess.BISHOP):
+    if piece.piece_type != chess.BISHOP:
         return 0
     # Define central squares (using chess module square constants)
     center_squares = [chess.D4, chess.D5, chess.E4, chess.E5]
     return 50 if move.to_square in center_squares else 0
 
+def pawn_capture_bonus(board, move):
+    """
+    Award an extra bonus for pawn captures aimed at the center.
+    Applies when a pawn captures on d4, d5, e4, or e5.
+    """
+    piece = board.piece_at(move.from_square)
+    if piece and piece.piece_type == chess.PAWN and board.piece_at(move.to_square):
+        center_squares = {chess.D4, chess.D5, chess.E4, chess.E5}
+        return 50 if move.to_square in center_squares else 0
+    return 0
+
+def central_control_bonus(board, move):
+    """
+    Award a bonus for pawn moves that control the center.
+    Central squares considered: d3, d4, e3, e4.
+    """
+    piece = board.piece_at(move.from_square)
+    if piece and piece.piece_type == chess.PAWN:
+        center_squares = {chess.D3, chess.D4, chess.E3, chess.E4}
+        return 100 if move.to_square in center_squares else 0
+    return 0
+
+def tactical_bonus(board, move):
+    """
+    Award additional bonus if the move stacks tactical pressure:
+    - Extra bonus if move gives check.
+    - Extra bonus if capturing a high-value (queen) piece.
+    - Bonus if after move enemy king remains in check.
+    """
+    bonus = 0
+    # Use extra bonus if move gives check
+    if hasattr(board, "gives_check") and board.gives_check(move):
+        bonus += 600  # extra bonus for check
+    # Bonus for capturing a high value piece (queen)
+    captured = board.piece_at(move.to_square)
+    if captured and captured.piece_type == chess.QUEEN:
+        bonus += 800
+    # Simulate move to see if enemy king remains under pressure
+    board_copy = board.copy()
+    board_copy.push(move)
+    if board_copy.is_check():
+        bonus += 300
+    return bonus
+
 def score_move(board, move):
     """
     Enhanced move ordering:
     - Uses evaluation functions for captures and positional improvement.
-    - Additionally, rewards moves giving check, and developing moves (moving a knight or bishop to center).
+    - Additionally rewards moves giving check,
+      pawn moves controlling center, and pawn captures toward the center.
     - Also adds a bonus for moves targeting the last moved square.
-    - Penalizes king moves that are not castling.
+    - Penalizes unsound king moves (if not castling).
+    - Adds extra tactical bonus for stacking pressure.
     """
     score = 0
     captured = board.piece_at(move.to_square)
@@ -112,16 +159,21 @@ def score_move(board, move):
     # Reward moves that give check.
     if hasattr(board, "gives_check") and board.gives_check(move):
         score += 500
-    # Add development bonus for knights and bishops moving into central squares.
-    score += development_bonus(board, move)
+    # Removed development bonus since piece–square tables handle development.
+    # Add bonus for pawn moves that control center.
+    score += central_control_bonus(board, move)
+    # Extra bonus for pawn captures toward the center.
+    score += pawn_capture_bonus(board, move)
     # Bonus for targeting last moved square.
     if board.move_stack:
         last_move = board.move_stack[-1]
         if move.to_square == last_move.to_square:
             score += 300
-    # Penalize unsound king moves (i.e. king moves that are not castling).
+    # Penalize unsound king moves (if not castling).
     if attacker and attacker.piece_type == chess.KING and not board.is_castling(move):
         score -= 500
+    # Add extra tactical bonus to stack pressure.
+    score += tactical_bonus(board, move)
     return score
 
 def has_immediate_king_capture(board, moves):
@@ -278,7 +330,12 @@ class Searcher:
         best_move_found = None
         prev_score = 0
         ASPIRATION_WINDOW = 50
+        start_time = time()  # record search start time
         for depth in range(1, max_depth + 1):
+            # Check elapsed time; if over 10 seconds, break early.
+            if time() - start_time > 10:
+                print(f"Search time exceeded cutoff at depth {depth}.")
+                break
             gamma = prev_score
             lower = gamma - ASPIRATION_WINDOW
             upper = gamma + ASPIRATION_WINDOW
