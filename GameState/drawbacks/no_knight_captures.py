@@ -21,6 +21,6 @@ DRAWBACK_INFO = {
     "loss_condition": None,
     "piece_value_override": {
         # Knight still has value but reduced due to limitation
-        chess.KNIGHT: 200  # Reduced from standard 320 value
+        chess.KNIGHT: 50  # Reduced from standard 320 value
     }
 }

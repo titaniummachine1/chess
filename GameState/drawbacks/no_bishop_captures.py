@@ -21,6 +21,6 @@ DRAWBACK_INFO = {
     "loss_condition": None,
     "piece_value_override": {
         # Bishop still has value but reduced due to limitation
-        chess.BISHOP: 200  # Reduced from standard 330 value
+        chess.BISHOP: 50  # Reduced from standard 330 value
     }
 }

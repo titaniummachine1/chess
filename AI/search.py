@@ -1,222 +1,284 @@
 import numpy as np
 import chess
-import random
 from GameState.movegen import DrawbackBoard
 import AI.evaluation as evaluation
 from collections import namedtuple
-from AI.piece_square_table import PIECE_VALUES, interpolate_piece_square, compute_game_phase
+import random
 
+# Set to True to see verbose debug output including principal variation.
 DEBUG = False
 
+###############################################################################
 # Zobrist Hashing
+###############################################################################
+
+# Global Zobrist table for pieces (square, symbol) -> 64-bit random integer.
 ZOBRIST_TABLE = {}
-ZOBRIST_CASTLING = {right: random.getrandbits(64) for right in "KQkq"}
+
+# Precomputed random numbers for castling rights and en passant.
+ZOBRIST_CASTLING = { right: random.getrandbits(64) for right in "KQkq" }
+# For each of the 64 squares, a random number to be used if an en passant square exists.
 ZOBRIST_EP_64 = [random.getrandbits(64) for _ in range(64)]
-ZOBRIST_WHITE_TURN = random.getrandbits(64)
-ZOBRIST_BLACK_TURN = random.getrandbits(64)
+
+# Constants for turn: using fixed constants.
+ZOBRIST_WHITE_TURN = 0xF0F0F0F0F0F0F0F0
+ZOBRIST_BLACK_TURN = 0x0F0F0F0F0F0F0F0F
 
 def compute_zobrist_key(board):
     key = 0
+    # Incorporate pieces.
     for square, piece in board.piece_map().items():
-        symbol = piece.symbol()
+        symbol = piece.symbol() if hasattr(piece, "symbol") else str(piece)
         if (square, symbol) not in ZOBRIST_TABLE:
             ZOBRIST_TABLE[(square, symbol)] = random.getrandbits(64)
         key ^= ZOBRIST_TABLE[(square, symbol)]
-    
+    # Incorporate turn.
     key ^= ZOBRIST_WHITE_TURN if board.turn == chess.WHITE else ZOBRIST_BLACK_TURN
-    castling = board.castling_xfen()
+    # Incorporate castling rights.
+    # (Assuming board.castling_xfen() returns a string like "KQkq" or "-" if none.)
+    castling = board.castling_xfen() if hasattr(board, "castling_xfen") else board.castling_xfen()
     for char in castling:
         if char in ZOBRIST_CASTLING:
             key ^= ZOBRIST_CASTLING[char]
-    
+    # Incorporate en passant square.
     if board.ep_square is not None:
         key ^= ZOBRIST_EP_64[board.ep_square]
-    
     return key
 
 def get_transposition_key(board):
+    """
+    Returns a Zobrist hash key for the board.
+    If the board already has a 'zobrist_key' attribute, we assume it is up to date.
+    Otherwise, compute the key from scratch.
+    """
+    if hasattr(board, "zobrist_key"):
+        return board.zobrist_key
     return compute_zobrist_key(board)
 
+
+###############################################################################
 # Evaluation & Move Helpers
+###############################################################################
+
 def eval_board(board):
+    """
+    Uses incremental evaluation if available; otherwise, calls the full evaluation.
+    """
+    if hasattr(board, "incremental_evaluate"):
+        return board.incremental_evaluate()
     return evaluation.evaluate(board)
 
-def get_piece_value_full(board, piece_type, color, square):
-    symbol = chess.piece_symbol(piece_type).upper()
-    base_tuple = PIECE_VALUES.get(symbol, (0, 0))
-    phase = compute_game_phase(board)
-    base_value = base_tuple[0] * phase + base_tuple[1] * (1 - phase)
-    bonus = interpolate_piece_square(symbol, square, color, board)
-    return base_value + bonus
-
 def score_move(board, move):
-    if board.is_capture(move):
-        captured = board.piece_at(move.to_square)
-        attacker = board.piece_at(move.from_square)
-        
-        if captured.piece_type == chess.KING:
+    """
+    Basic heuristic for move ordering:
+      - King captures get highest priority.
+      - Other captures use MVV-LVA.
+      - Non-captures score 0.
+    """
+    captured_piece = board.piece_at(move.to_square)
+    if captured_piece:
+        if captured_piece.piece_type == chess.KING:
             return 1000000
-        
-        victim_val = get_piece_value_full(board, captured.piece_type, captured.color, move.to_square)
-        aggressor_val = get_piece_value_full(board, attacker.piece_type, attacker.color, move.from_square)
-        return (victim_val - aggressor_val) * 100  # MVV-LVA ordering
-        
-    if board.gives_check(move):
-        return 5000
-        
+        attacker = board.piece_at(move.from_square)
+        victim_value = evaluation.get_piece_value(board, captured_piece.piece_type, captured_piece.color)
+        attacker_value = evaluation.get_piece_value(board, attacker.piece_type, attacker.color)
+        return victim_value * 10 - attacker_value
     return 0
 
-# Search Enhancements
+def has_immediate_king_capture(board, moves):
+    for move in moves:
+        captured = board.piece_at(move.to_square)
+        if captured and captured.piece_type == chess.KING:
+            return True
+    return False
+
+def is_game_over(board):
+    pieces = board.piece_map().values()
+    white_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE for p in pieces)
+    black_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK for p in pieces)
+    if not white_alive:
+        return -evaluation.Score.CHECKMATE.value
+    if not black_alive:
+        return evaluation.Score.CHECKMATE.value
+    return None
+
+def is_capture(board, move):
+    return board.piece_at(move.to_square) is not None
+
+###############################################################################
+# Search Enhancements: Quiescence, Killer/History, Extensions, Null-Move, Aspiration
+###############################################################################
+
+# Transposition table entry: (lower bound, upper bound)
 Entry = namedtuple("Entry", "lower upper")
 
 class Searcher:
-    def __init__(self):
-        self.tp_score = {}  # (zobrist_key, depth): Entry
-        self.tp_move = {}   # zobrist_key: move
+    def __init__(self, use_incremental_eval=False):
+        self.tp_score = {}   # key: (zobrist key + ":" + depth)
+        self.tp_move = {}    # key: zobrist key -> best move found
         self.nodes = 0
-        self.killer_moves = {}  # depth: [move1, move2]
-        self.history_table = {} # (from_sq, to_sq): score
+        self.use_incremental_eval = use_incremental_eval
+        self.killer_moves = {}    # key: depth -> list of moves causing beta cutoffs
+        self.history_table = {}   # key: move -> heuristic score
+        self.search_board = None  # Internal board copy for search operations
+
+    def move_ordering_score(self, board, move, depth):
+        base = score_move(board, move)
+        killer_bonus = 5000 if move in self.killer_moves.get(depth, []) else 0
+        history_bonus = self.history_table.get(move, 0)
+        return base + killer_bonus + history_bonus
 
     def quiescence(self, board, alpha, beta):
         stand_pat = eval_board(board)
         if stand_pat >= beta:
             return beta
-        alpha = max(alpha, stand_pat)
-        
-        for move in sorted(board.generate_legal_captures(), 
-                         key=lambda m: -score_move(board, m)):
+        if alpha < stand_pat:
+            alpha = stand_pat
+        moves = [m for m in board.generate_legal_moves()
+                 if is_capture(board, m) or (hasattr(board, "gives_check") and board.gives_check(m))]
+        moves.sort(key=lambda m: score_move(board, m), reverse=True)
+        for move in moves:
             board.push(move)
             score = -self.quiescence(board, -beta, -alpha)
             board.pop()
-            
             if score >= beta:
                 return beta
             if score > alpha:
                 alpha = score
-        
         return alpha
 
-    def alphabeta(self, board, depth, alpha, beta):
+    def bound(self, board, gamma, depth):
         self.nodes += 1
-        original_alpha = alpha
-        
-        # Check transposition table
-        key = (get_transposition_key(board), depth)
-        if key in self.tp_score:
-            entry = self.tp_score[key]
-            if entry.lower >= beta:
-                return entry.lower
-            if entry.upper <= alpha:
-                return entry.upper
-            alpha = max(alpha, entry.lower)
-            beta = min(beta, entry.upper)
-        
-        # Terminal node checks
-        if board.is_checkmate():
-            return -evaluation.Score.CHECKMATE.value
+
+        # Terminal position check.
+        result = is_game_over(board)
+        if result is not None:
+            return result
         if depth == 0:
-            return self.quiescence(board, alpha, beta)
-        
-        # Null move pruning
-        if depth >= 3 and not board.is_check():
-            board.push(chess.Move.null())
-            score = -self.alphabeta(board, depth-3, -beta, -beta+1)
-            board.pop()
-            if score >= beta:
-                return beta
-        
-        moves = list(board.legal_moves)
-        moves.sort(key=lambda m: (
-            self.tp_move.get(get_transposition_key(board)) == m,
-            board.is_capture(m),
-            self.killer_moves.get(depth, {}).get(m, 0),
-            self.history_table.get((m.from_square, m.to_square), 0),
-            score_move(board, m)
-        ), reverse=True)
-        
-        best_value = -np.inf
-        best_move = None
-        
-        for move in moves:
+            return self.quiescence(board, -evaluation.Score.CHECKMATE.value, evaluation.Score.CHECKMATE.value)
+
+        # Null-move pruning.
+        if depth >= 3 and hasattr(board, "push_null") and not board.is_check():
+            board.push_null()
+            null_score = -self.bound(board, 1 - gamma, depth - 2)
+            board.pop_null()
+            if null_score >= gamma:
+                return null_score
+
+        key = str(get_transposition_key(board)) + f":{depth}"
+        entry = self.tp_score.get(key, Entry(-evaluation.Score.CHECKMATE.value, evaluation.Score.CHECKMATE.value))
+        if entry.lower >= gamma:
+            return entry.lower
+        if entry.upper < gamma:
+            return entry.upper
+
+        moves = list(board.generate_legal_moves())
+        if not moves:
+            return -evaluation.Score.CHECKMATE.value // 2
+        if has_immediate_king_capture(board, moves):
+            return evaluation.Score.CHECKMATE.value
+
+        # Move ordering: incorporate base score, killer moves, and history heuristic.
+        moves.sort(key=lambda m: self.move_ordering_score(board, m, depth), reverse=True)
+
+        best = -evaluation.Score.CHECKMATE.value
+        for i, move in enumerate(moves):
+            # Late Move Reductions (LMR): reduce depth for moves beyond the first two that aren't captures.
+            reduction = 1 if i >= 2 and depth >= 3 and not is_capture(board, move) else 0
+
+            # Search Extensions for major threats.
+            extension = 0
+            if hasattr(board, "gives_check") and board.gives_check(move):
+                extension = 1
+            elif is_capture(board, move):
+                captured = board.piece_at(move.to_square)
+                if captured and captured.piece_type in (chess.QUEEN, chess.ROOK):
+                    extension = 1
+
             board.push(move)
-            score = -self.alphabeta(board, depth-1, -beta, -alpha)
+            score = -self.bound(board, 1 - gamma, depth - 1 - reduction + extension)
             board.pop()
-            
-            if score >= beta:
-                self._update_killers(depth, move)
-                self.tp_score[key] = Entry(score, score)
-                return score
-                
-            if score > best_value:
-                best_value = score
-                best_move = move
-                alpha = max(alpha, score)
-        
-        # Store in transposition table
-        if best_value <= original_alpha:
-            self.tp_score[key] = Entry(-np.inf, best_value)
-        elif best_value >= beta:
-            self.tp_score[key] = Entry(best_value, np.inf)
-        else:
-            self.tp_score[key] = Entry(best_value, best_value)
-        
-        if best_move:
-            self.tp_move[get_transposition_key(board)] = best_move
-        
-        return best_value
 
-    def _update_killers(self, depth, move):
-        killers = self.killer_moves.get(depth, [])
-        if move not in killers:
-            killers = [move] + killers[:1]
-            self.killer_moves[depth] = killers
-        self.history_table[(move.from_square, move.to_square)] = \
-            self.history_table.get((move.from_square, move.to_square), 0) + 2**depth
-
-    def search(self, board, max_depth=4):
-        best_move = None
-        aspiration_window = 50
-        alpha = -np.inf
-        beta = np.inf
-        
-        for depth in range(1, max_depth+1):
-            try:
-                score = self.alphabeta(board, depth, alpha, beta)
-                
-                if score <= alpha:
-                    alpha = -np.inf
-                elif score >= beta:
-                    beta = np.inf
-                else:
-                    aspiration_window *= 2
-                    alpha = score - aspiration_window
-                    beta = score + aspiration_window
-                
-                best_move = self.tp_move.get(get_transposition_key(board))
-                if DEBUG:
-                    pv = self.get_pv(board)
-                    print(f"Depth {depth}: {score} {best_move} PV: {pv}")
-                    
-            except Exception as e:
-                if DEBUG:
-                    print(f"Search error at depth {depth}: {e}")
+            if score > best:
+                best = score
+            if best >= gamma:
+                # Update killer moves and history heuristics.
+                self.killer_moves.setdefault(depth, []).append(move)
+                self.history_table[move] = self.history_table.get(move, 0) + depth * depth
+                self.tp_move[get_transposition_key(board)] = move
                 break
-        
-        return best_move or next(iter(board.legal_moves)), score
 
-    def get_pv(self, board):
+        if best >= gamma:
+            self.tp_score[key] = Entry(best, entry.upper)
+        else:
+            self.tp_score[key] = Entry(entry.lower, best)
+        return best
+
+    def get_principal_variation(self, board, max_length=10):
         pv = []
-        current_board = board.copy()
-        for _ in range(10):
-            key = get_transposition_key(current_board)
+        local_board = board.copy()
+        while True:
+            key = get_transposition_key(local_board)
             if key not in self.tp_move:
                 break
             move = self.tp_move[key]
             pv.append(move)
-            current_board.push(move)
+            local_board.push(move)
+            if len(pv) >= max_length:
+                break
         return pv
 
-def best_move(board, depth=4):
-    searcher = Searcher()
-    best_move = searcher.search(board.copy(), depth)[0]
-    return best_move
+    def search(self, board, max_depth=4):
+        # Create internal copy of the board for search operations
+        self.search_board = board.copy()
+        
+        best_move_found = None
+        prev_score = 0
+        ASPIRATION_WINDOW = 50
+        # Iterative deepening with aspiration windows.
+        for depth in range(1, max_depth + 1):
+            gamma = prev_score
+            lower = gamma - ASPIRATION_WINDOW
+            upper = gamma + ASPIRATION_WINDOW
+            iteration = 0
+            while iteration < 20:
+                score = self.bound(self.search_board, gamma, depth)
+                if score < lower:
+                    gamma = score
+                    lower = gamma - ASPIRATION_WINDOW
+                elif score > upper:
+                    gamma = score
+                    upper = gamma + ASPIRATION_WINDOW
+                else:
+                    break
+                iteration += 1
+            if iteration >= 20:
+                print(f"[Warning] Aspiration window failed to converge at depth {depth}; using last score.")
+            prev_score = score
+            best_move_found = self.tp_move.get(get_transposition_key(self.search_board), None)
+            pv = self.get_principal_variation(self.search_board)
+            if DEBUG:
+                print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
+            else:
+                print(f"Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
+        return best_move_found
+
+def best_move(board, depth) -> int:
+    try:
+        # Always work with a copy of the board to avoid modifying the original
+        board_copy = board.copy()
+        searcher = Searcher()
+        move = searcher.search(board_copy, max_depth=depth)
+    except Exception as e:
+        print(f"Error during search: {e}")
+        move = None
+    if move is None:
+        moves = list(board.generate_legal_moves())
+        if moves:
+            move = moves[0]
+            print(f"AI choosing fallback move: {move}")
+        else:
+            print("AI has no legal moves.")
+    else:
+        print(f"AI chooses {move}")
+    return move

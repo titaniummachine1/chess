@@ -1,13 +1,17 @@
 import chess
 
-# Define standard piece values for comparison (based on conventional chess values)
+# Modified piece values to reflect capture limitations:
+# - Pawns worth less because they can't capture other pawns effectively
+# - Knights/Bishops reduced because they can't capture higher value pieces
+# - Rooks slightly reduced
+# - Queen increased slightly as it's less vulnerable
 PIECE_VALUES = {
-    chess.PAWN: 100,
-    chess.KNIGHT: 320,
-    chess.BISHOP: 330,
-    chess.ROOK: 500,
-    chess.QUEEN: 900,
-    chess.KING: 20000  # Kings can always be captured regardless of the drawback
+    chess.PAWN: 60,      # Reduced from 100 - very limited in captures
+    chess.KNIGHT: 200,   # Reduced from 300 - can't capture higher pieces
+    chess.BISHOP: 200,   # Reduced from 300 - can't capture higher pieces
+    chess.ROOK: 400,     # Reduced from 500 - somewhat limited
+    chess.QUEEN: 1100,   # Increased from 900 - more valuable as it's safer
+    chess.KING: 20000    # Unchanged - can always be captured
 }
 
 def illegal_moves(board, color, move):
@@ -33,7 +37,7 @@ def illegal_moves(board, color, move):
     attacker_value = PIECE_VALUES.get(attacker.piece_type, 0)
     target_value = PIECE_VALUES.get(target.piece_type, 0)
     
-    # The move is illegal if the attacker is less valuable than the target
+    # The move is illegal if the attacker is less thhen in value to the target
     if attacker_value < target_value:
         return True  # Block the move
     
@@ -45,9 +49,7 @@ DRAWBACK_INFO = {
     "description": "Your pieces can only capture pieces of equal or lesser value (exception: kings can always be captured)",
     "illegal_moves": illegal_moves,
     "loss_condition": None,
-    "piece_value_override": {
-        # No value overrides needed, but this changes strategy significantly
-    },
+    "piece_value_override": PIECE_VALUES,  # Use our modified values
     "positional_override": {
         # No positional overrides
     }
