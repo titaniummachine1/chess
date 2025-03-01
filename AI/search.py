@@ -48,27 +48,34 @@ def development_bonus(board, move):
     center_squares = [chess.D4, chess.D5, chess.E4, chess.E5]
     return 50 if move.to_square in center_squares else 0
 
-def pawn_capture_bonus(board, move):
-    """
-    Award an extra bonus for pawn captures aimed at the center.
-    Applies when a pawn captures on d4, d5, e4, or e5.
-    """
-    piece = board.piece_at(move.from_square)
-    if piece and piece.piece_type == chess.PAWN and board.piece_at(move.to_square):
-        center_squares = {chess.D4, chess.D5, chess.E4, chess.E5}
-        return 50 if move.to_square in center_squares else 0
-    return 0
+def eval_board(board):
+    """Enhanced evaluation with pawn structure analysis"""
+    score = evaluation.evaluate(board)
+    
+    # Add pawn structure bonuses
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.piece_type == chess.PAWN:
+            # Bonus for protected pawns
+            if board.is_protected(piece.color, square):
+                score += 15 if piece.color == chess.WHITE else -15
+            # Penalty for isolated pawns
+            if not board.has_friendly_pawns(piece.color, square):
+                score -= 20 if piece.color == chess.WHITE else +20
+    return score
 
 def central_control_bonus(board, move):
-    """
-    Award a bonus for pawn moves that control the center.
-    Central squares considered: d3, d4, e3, e4.
-    """
+    """Award bonus for pawn moves controlling color-appropriate center squares"""
     piece = board.piece_at(move.from_square)
-    if piece and piece.piece_type == chess.PAWN:
+    if not piece or piece.piece_type != chess.PAWN:
+        return 0
+    
+    if piece.color == chess.WHITE:
         center_squares = {chess.D3, chess.D4, chess.E3, chess.E4}
-        return 100 if move.to_square in center_squares else 0
-    return 0
+    else:
+        center_squares = {chess.D5, chess.D4, chess.E5, chess.E4}
+    
+    return 100 if move.to_square in center_squares else 0
 
 def tactical_bonus(board, move):
     """
@@ -179,6 +186,11 @@ class Searcher:
 
     def quiescence(self, board, alpha, beta):
         stand_pat = self.get_evaluation(board)
+        if board.turn == chess.BLACK:
+            stand_pat = -stand_pat  # Ensure proper perspective
+
+        stand_pat = -stand_pat  # Ensure proper perspective
+        stand_pat = self.get_evaluation(board)
         if stand_pat >= beta:
             return beta
         if alpha < stand_pat:
@@ -198,6 +210,9 @@ class Searcher:
 
     def bound(self, board, gamma, depth):
         self.nodes += 1
+        # Add perspective correction before returning results
+        if board.turn == chess.BLACK:
+            gamma = -gamma
 
         # Terminal position check.
         result = is_game_over(board)
