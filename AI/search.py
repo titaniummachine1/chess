@@ -122,8 +122,6 @@ def score_move(board, move):
     # Removed development bonus since piece–square tables handle development.
     # Add bonus for pawn moves that control center.
     score += central_control_bonus(board, move)
-    # Extra bonus for pawn captures toward the center.
-    score += pawn_capture_bonus(board, move)
     # Bonus for targeting last moved square.
     if board.move_stack:
         last_move = board.move_stack[-1]
