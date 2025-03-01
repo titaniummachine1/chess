@@ -80,11 +80,27 @@ def eval_board(board):
     """
     return evaluation.evaluate(board)
 
+def development_bonus(board, move):
+    """
+    Award a bonus for moves that develop a piece into the center.
+    Applies to knights and bishops.
+    """
+    piece = board.piece_at(move.from_square)
+    if piece is None:
+        return 0
+    if piece.piece_type not in (chess.KNIGHT, chess.BISHOP):
+        return 0
+    # Define central squares (using chess module square constants)
+    center_squares = [chess.D4, chess.D5, chess.E4, chess.E5]
+    return 50 if move.to_square in center_squares else 0
+
 def score_move(board, move):
     """
     Enhanced move ordering:
-    - For captures and non-captures, use evaluation functions.
-    - Additionally, add a bonus if the move is castling and penalize king moves that are not castling.
+    - Uses evaluation functions for captures and positional improvement.
+    - Additionally, rewards moves giving check, and developing moves (moving a knight or bishop to center).
+    - Also adds a bonus for moves targeting the last moved square.
+    - Penalizes king moves that are not castling.
     """
     score = 0
     captured = board.piece_at(move.to_square)
@@ -93,18 +109,19 @@ def score_move(board, move):
         score = evaluation.get_capture_score(board, attacker, captured)
     else:
         score = evaluation.get_positional_improvement(board, move)
-    # Bonus and penalty related to king safety:
-    if board.is_castling(move):
-        score += 500   # Strong bonus for castling moves.
-    else:
-        # If the moving piece is the king but not castling, apply a penalty.
-        if attacker and attacker.piece_type == chess.KING:
-            score -= 500
-    # Bonus for targeting the last moved square.
+    # Reward moves that give check.
+    if hasattr(board, "gives_check") and board.gives_check(move):
+        score += 500
+    # Add development bonus for knights and bishops moving into central squares.
+    score += development_bonus(board, move)
+    # Bonus for targeting last moved square.
     if board.move_stack:
         last_move = board.move_stack[-1]
         if move.to_square == last_move.to_square:
             score += 300
+    # Penalize unsound king moves (i.e. king moves that are not castling).
+    if attacker and attacker.piece_type == chess.KING and not board.is_castling(move):
+        score -= 500
     return score
 
 def has_immediate_king_capture(board, moves):
