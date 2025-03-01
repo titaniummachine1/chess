@@ -76,33 +76,9 @@ def compute_game_phase(board):
 
 def eval_board(board):
     """
-    Uses incremental evaluation if available; otherwise, calls the full evaluation.
-    Also includes piece-square table evaluation.
+    Use the evaluation module's evaluate() function directly.
     """
-    if hasattr(board, "incremental_evaluate"):
-        return board.incremental_evaluate()
-    
-    # Base evaluation
-    score = evaluation.evaluate(board)
-    
-    # Add piece-square table evaluation
-    phase = piece_square_table.compute_game_phase(board)
-    
-    for square, piece in board.piece_map().items():
-        piece_symbol = piece.symbol().upper()
-        
-        # Use the interpolation function from the piece_square_table module
-        piece_square_value = piece_square_table.interpolate_piece_square(
-            piece_symbol, square, piece.color, board
-        )
-        
-        # Adjust the score based on piece color
-        if piece.color == chess.WHITE:
-            score += piece_square_value
-        else:
-            score -= piece_square_value
-    
-    return score
+    return evaluation.evaluate(board)
 
 def score_move(board, move):
     """

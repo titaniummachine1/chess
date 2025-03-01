@@ -39,26 +39,31 @@ def get_capture_score(board, attacker, victim):
 
 def get_positional_improvement(board, move):
     """
-    Compute bonus as the difference in positional bonus (interpolated via piece_square_table)
-    from the source square to the destination.
+    Compute bonus as the difference in positional bonus from source to destination.
+    For knights, add an extra penalty if moving to the board’s rim.
     """
     piece = board.piece_at(move.from_square)
     if piece is None:
         return 0
-    # Map piece type to symbol letter (all uppercase)
     mapping = {
-      chess.PAWN: "P",
-      chess.KNIGHT: "N",
-      chess.BISHOP: "B",
-      chess.ROOK: "R",
-      chess.QUEEN: "Q",
-      chess.KING: "K"
+        chess.PAWN: "P",
+        chess.KNIGHT: "N",
+        chess.BISHOP: "B",
+        chess.ROOK: "R",
+        chess.QUEEN: "Q",
+        chess.KING: "K"
     }
     symbol = mapping.get(piece.piece_type)
-    # Use pst.interpolate_piece_square to get a blended value based on game phase.
     from_val = pst.interpolate_piece_square(symbol, move.from_square, piece.color, board)
     to_val = pst.interpolate_piece_square(symbol, move.to_square, piece.color, board)
-    return to_val - from_val
+    improvement = to_val - from_val
+    # Additional penalty for knights moved to the rim
+    if piece.piece_type == chess.KNIGHT:
+        file = chess.square_file(move.to_square)
+        rank = chess.square_rank(move.to_square)
+        if file in (0, 7) or rank in (0, 7):
+            improvement -= 20  # Adjust penalty as needed
+    return improvement
 
 def eval_pieces(board):
     """Material balance using evaluate_board material part."""
