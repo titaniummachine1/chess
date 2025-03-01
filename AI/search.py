@@ -48,21 +48,16 @@ def development_bonus(board, move):
     center_squares = [chess.D4, chess.D5, chess.E4, chess.E5]
     return 50 if move.to_square in center_squares else 0
 
-def eval_board(board):
-    """Enhanced evaluation with pawn structure analysis"""
-    score = evaluation.evaluate(board)
-    
-    # Add pawn structure bonuses
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece and piece.piece_type == chess.PAWN:
-            # Bonus for protected pawns
-            if board.is_protected(piece.color, square):
-                score += 15 if piece.color == chess.WHITE else -15
-            # Penalty for isolated pawns
-            if not board.has_friendly_pawns(piece.color, square):
-                score -= 20 if piece.color == chess.WHITE else +20
-    return score
+def pawn_capture_bonus(board, move):
+    """
+    Award an extra bonus for pawn captures aimed at the center.
+    Applies when a pawn captures on d4, d5, e4, or e5.
+    """
+    piece = board.piece_at(move.from_square)
+    if piece and piece.piece_type == chess.PAWN and board.piece_at(move.to_square):
+        center_squares = {chess.D4, chess.D5, chess.E4, chess.E5}
+        return 50 if move.to_square in center_squares else 0
+    return 0
 
 def central_control_bonus(board, move):
     """Award bonus for pawn moves controlling color-appropriate center squares"""
@@ -122,6 +117,8 @@ def score_move(board, move):
     # Removed development bonus since piece–square tables handle development.
     # Add bonus for pawn moves that control center.
     score += central_control_bonus(board, move)
+    # Extra bonus for pawn captures toward the center.
+    score += pawn_capture_bonus(board, move)
     # Bonus for targeting last moved square.
     if board.move_stack:
         last_move = board.move_stack[-1]
@@ -184,11 +181,6 @@ class Searcher:
 
     def quiescence(self, board, alpha, beta):
         stand_pat = self.get_evaluation(board)
-        if board.turn == chess.BLACK:
-            stand_pat = -stand_pat  # Ensure proper perspective
-
-        stand_pat = -stand_pat  # Ensure proper perspective
-        stand_pat = self.get_evaluation(board)
         if stand_pat >= beta:
             return beta
         if alpha < stand_pat:
@@ -208,9 +200,6 @@ class Searcher:
 
     def bound(self, board, gamma, depth):
         self.nodes += 1
-        # Add perspective correction before returning results
-        if board.turn == chess.BLACK:
-            gamma = -gamma
 
         # Terminal position check.
         result = is_game_over(board)
