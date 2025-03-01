@@ -1,60 +1,13 @@
 import numpy as np
 import chess
-from AI import evaluation  # now evaluation handles both material & positional evaluation
+from AI import evaluation  # evaluation now uses unified Zobrist hash.
 from AI import piece_square_table as piece_square_table
+from AI.zobrist import get_zobrist_key  # NEW import
 from collections import namedtuple
 import random
-from time import time  # NEW import
+from time import time
 
 DEBUG = False
-
-###############################################################################
-# Zobrist Hashing
-###############################################################################
-
-# Global Zobrist table for pieces (square, symbol) -> 64-bit random integer.
-ZOBRIST_TABLE = {}
-
-# Precomputed random numbers for castling rights and en passant.
-ZOBRIST_CASTLING = { right: random.getrandbits(64) for right in "KQkq" }
-# For each of the 64 squares, a random number to be used if an en passant square exists.
-ZOBRIST_EP_64 = [random.getrandbits(64) for _ in range(64)]
-
-# Constants for turn: using fixed constants.
-ZOBRIST_WHITE_TURN = 0xF0F0F0F0F0F0F0F0
-ZOBRIST_BLACK_TURN = 0x0F0F0F0F0F0F0F0F
-
-def compute_zobrist_key(board):
-    key = 0
-    # Incorporate pieces.
-    for square, piece in board.piece_map().items():
-        symbol = piece.symbol() if hasattr(piece, "symbol") else str(piece)
-        if (square, symbol) not in ZOBRIST_TABLE:
-            ZOBRIST_TABLE[(square, symbol)] = random.getrandbits(64)
-        key ^= ZOBRIST_TABLE[(square, symbol)]
-    # Incorporate turn.
-    key ^= ZOBRIST_WHITE_TURN if board.turn == chess.WHITE else ZOBRIST_BLACK_TURN
-    # Incorporate castling rights.
-    # (Assuming board.castling_xfen() returns a string like "KQkq" or "-" if none.)
-    castling = board.castling_xfen() if hasattr(board, "castling_xfen") else board.castling_xfen()
-    for char in castling:
-        if char in ZOBRIST_CASTLING:
-            key ^= ZOBRIST_CASTLING[char]
-    # Incorporate en passant square.
-    if board.ep_square is not None:
-        key ^= ZOBRIST_EP_64[board.ep_square]
-    return key
-
-def get_transposition_key(board):
-    """
-    Returns a Zobrist hash key for the board.
-    If the board already has a 'zobrist_key' attribute, we assume it is up to date.
-    Otherwise, compute the key from scratch.
-    """
-    if hasattr(board, "zobrist_key"):
-        return board.zobrist_key
-    return compute_zobrist_key(board)
-
 
 ###############################################################################
 # Evaluation & Move Helpers
@@ -261,7 +214,7 @@ class Searcher:
             if null_score >= gamma:
                 return null_score
 
-        key = str(evaluation.get_transposition_key(board)) + f":{depth}"
+        key = str(get_zobrist_key(board)) + f":{depth}"
         entry = self.tp_score.get(key, Entry(-evaluation.Score.CHECKMATE.value, evaluation.Score.CHECKMATE.value))
         if entry.lower >= gamma:
             return entry.lower
@@ -301,7 +254,7 @@ class Searcher:
                 # Update killer moves and history heuristics.
                 self.killer_moves.setdefault(depth, []).append(move)
                 self.history_table[move] = self.history_table.get(move, 0) + depth * depth
-                self.tp_move[evaluation.get_transposition_key(board)] = move
+                self.tp_move[get_zobrist_key(board)] = move
                 break
 
         if best >= gamma:
@@ -314,7 +267,7 @@ class Searcher:
         pv = []
         local_board = board.copy()
         while True:
-            key = evaluation.get_transposition_key(local_board)
+            key = get_zobrist_key(local_board)
             if key not in self.tp_move:
                 break
             move = self.tp_move[key]
@@ -354,7 +307,7 @@ class Searcher:
             if iteration >= 20:
                 print(f"[Warning] Aspiration window failed to converge at depth {depth}; using last score.")
             prev_score = score
-            best_move_found = self.tp_move.get(evaluation.get_transposition_key(self.search_board), None)
+            best_move_found = self.tp_move.get(get_zobrist_key(self.search_board), None)
             pv = self.get_principal_variation(self.search_board)
             if DEBUG:
                 print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")

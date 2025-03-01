@@ -3,6 +3,7 @@ import numpy as np
 import chess
 from GameState.drawback_manager import get_drawback_info  # remain for future use
 import AI.piece_square_table as pst
+from AI.zobrist import get_zobrist_key  # NEW import
 
 # Static material values (pure material, independent of position)
 STATIC_VALUES = {
@@ -149,6 +150,5 @@ def evaluate(board):
 
 # Fallback transposition key helper for search use.
 def get_transposition_key(board):
-    # For now, simply return the board FEN.
-    # Replace with a proper Zobrist hash if needed.
-    return board.fen()
+    # Now use the Zobrist hash from the unified module.
+    return get_zobrist_key(board)
