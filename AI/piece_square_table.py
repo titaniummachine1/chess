@@ -182,6 +182,7 @@ def interpolate_piece_square(piece, square, color, board):
         mg = piece_square_tables["mg"].get(key, [0]*64)[square]
         eg = piece_square_tables["eg"].get(key, [0]*64)[square]
     else:
+        # Use the precomputed flipped tables for black.
         mg = flipped_piece_square_tables["mg"].get(key, [0]*64)[square]
         eg = flipped_piece_square_tables["eg"].get(key, [0]*64)[square]
     return mg * phase_factor + eg * (1 - phase_factor)
