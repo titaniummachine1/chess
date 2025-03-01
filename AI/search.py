@@ -83,9 +83,8 @@ def eval_board(board):
 def score_move(board, move):
     """
     Enhanced move ordering:
-    - If the move is a capture, use evaluation.get_capture_score.
-    - Otherwise, use the positional improvement from evaluation.get_positional_improvement.
-    Also add a bonus if the move attacks the last moved piece.
+    - For captures and non-captures, use evaluation functions.
+    - Additionally, add a bonus if the move is castling and penalize king moves that are not castling.
     """
     score = 0
     captured = board.piece_at(move.to_square)
@@ -94,7 +93,14 @@ def score_move(board, move):
         score = evaluation.get_capture_score(board, attacker, captured)
     else:
         score = evaluation.get_positional_improvement(board, move)
-    # Bonus for targeting last moved opponent piece (if available)
+    # Bonus and penalty related to king safety:
+    if board.is_castling(move):
+        score += 500   # Strong bonus for castling moves.
+    else:
+        # If the moving piece is the king but not castling, apply a penalty.
+        if attacker and attacker.piece_type == chess.KING:
+            score -= 500
+    # Bonus for targeting the last moved square.
     if board.move_stack:
         last_move = board.move_stack[-1]
         if move.to_square == last_move.to_square:
@@ -144,8 +150,13 @@ class Searcher:
         history_bonus = self.history_table.get(move, 0)
         return base + killer_bonus + history_bonus
 
+    # NEW: helper to flip evaluation for side to move.
+    def get_evaluation(self, board):
+        val = evaluation.evaluate(board)
+        return val if board.turn == chess.WHITE else -val
+
     def quiescence(self, board, alpha, beta):
-        stand_pat = evaluation.evaluate(board)
+        stand_pat = self.get_evaluation(board)
         if stand_pat >= beta:
             return beta
         if alpha < stand_pat:
@@ -245,13 +256,11 @@ class Searcher:
         return pv
 
     def search(self, board, max_depth=4):
-        # Create internal copy of the board for search operations
+        print("Starting new search (preserving previous tables).")
         self.search_board = board.copy()
-        
         best_move_found = None
         prev_score = 0
         ASPIRATION_WINDOW = 50
-        # Iterative deepening with aspiration windows.
         for depth in range(1, max_depth + 1):
             gamma = prev_score
             lower = gamma - ASPIRATION_WINDOW

@@ -115,8 +115,8 @@ def eval_king_safety(board):
 def evaluate(board):
     """
     Full evaluation combining piece balance, mobility, king safety,
-    and any additional positional considerations.
-    All evaluation tasks are handled by this module.
+    and positional bonus from the piece–square tables.
+    Material values and positional bonuses are in centipawns.
     """
     # Early termination conditions
     pieces = board.piece_map().values()
@@ -145,8 +145,8 @@ def evaluate(board):
         pos_bonus = pst.interpolate_piece_square(mapping[piece.piece_type], square, piece.color, board)
         positional += pos_bonus if piece.color == chess.WHITE else -pos_bonus
 
-    # Weight positional bonus (e.g., 50% weight).
-    return material + mobility + safety + 0.5 * positional
+    # Remove the 0.5 weight to add full piece-square bonus.
+    return material + mobility + safety + positional
 
 # Fallback transposition key helper for search use.
 def get_transposition_key(board):
