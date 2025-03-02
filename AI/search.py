@@ -6,6 +6,7 @@ from AI.zobrist import get_zobrist_key  # NEW import
 from collections import namedtuple
 import random
 from time import time
+from AI.search_improvement import ImprovedMoveOrdering
 
 DEBUG = False
 
@@ -160,13 +161,11 @@ Entry = namedtuple("Entry", "lower upper")
 
 class Searcher:
     def __init__(self, use_incremental_eval=False):
-        self.tp_score = {}   # key: (zobrist key + ":" + depth)
-        self.tp_move = {}    # key: zobrist key -> best move found
+        self.tt = BoundedTranspositionTable(capacity=2**20)
         self.nodes = 0
         self.use_incremental_eval = use_incremental_eval
-        self.killer_moves = {}    # key: depth -> list of moves causing beta cutoffs
-        self.history_table = {}   # key: move -> heuristic score
-        self.search_board = None  # Internal board copy for search operations
+        self.move_ordering = ImprovedMoveOrdering()
+        self.search_board = None
 
     def move_ordering_score(self, board, move, depth):
         base = score_move(board, move)
@@ -209,74 +208,116 @@ class Searcher:
             return self.quiescence(board, -evaluation.Score.CHECKMATE.value, evaluation.Score.CHECKMATE.value)
 
         # Null-move pruning.
-        if depth >= 3 and hasattr(board, "push_null") and not board.is_check():
-            board.push_null()
-            null_score = -self.bound(board, 1 - gamma, depth - 2)
-            board.pop_null()
-            if null_score >= gamma:
-                return null_score
+        if depth >= 3 and not board.is_check():
+            nullmove_board = board.copy()
+            if hasattr(nullmove_board, 'push_null'):
+                nullmove_board.push_null()
+                null_score = -self.bound(nullmove_board, 1 - gamma, depth - 2)
+                if null_score >= gamma:
+                    return null_score
 
+        # Transposition table lookup
         key = str(get_zobrist_key(board)) + f":{depth}"
-        entry = self.tp_score.get(key, Entry(-evaluation.Score.CHECKMATE.value, evaluation.Score.CHECKMATE.value))
-        if entry.lower >= gamma:
-            return entry.lower
-        if entry.upper < gamma:
-            return entry.upper
+        tt_entry = self.tt.retrieve(key)
+        
+        # Correctly handle the stored entry
+        if tt_entry:
+            entry_data = tt_entry.get("entry")
+            if entry_data:
+                if entry_data.lower >= gamma:
+                    return entry_data.lower
+                if entry_data.upper < gamma:
+                    return entry_data.upper
+        else:
+            entry_data = Entry(-evaluation.Score.CHECKMATE.value, evaluation.Score.CHECKMATE.value)
 
-        moves = list(board.generate_legal_moves())
+        # Get all legal moves
+        moves = list(board.legal_moves)
         if not moves:
             return -evaluation.Score.CHECKMATE.value // 2
-        if has_immediate_king_capture(board, moves):
-            return evaluation.Score.CHECKMATE.value
+        
+        # Get PV move from transposition table
+        pv_move = None
+        tt_move_entry = self.tt.retrieve(str(get_zobrist_key(board)))
+        if tt_move_entry and "move" in tt_move_entry:
+            pv_move = tt_move_entry["move"]
+        
+        # IMPROVED MOVE ORDERING
+        ordered_moves = self.move_ordering.sort_moves(board, moves, pv_move, depth)
 
-        # Move ordering: incorporate base score, killer moves, and history heuristic.
-        moves.sort(key=lambda m: self.move_ordering_score(board, m, depth), reverse=True)
-
+        # Search through ordered moves
         best = -evaluation.Score.CHECKMATE.value
-        for i, move in enumerate(moves):
-            # Late Move Reductions (LMR): reduce depth for moves beyond the first two that aren't captures.
-            reduction = 1 if i >= 2 and depth >= 3 and not is_capture(board, move) else 0
-
-            # Search Extensions for major threats.
+        best_move = None
+        for i, move in enumerate(ordered_moves):
+            # Late Move Reductions with refinements from Numbfish
+            reduction = 0
+            is_quiet = not board.is_capture(move) and not board.gives_check(move)
+            
+            if i >= 3 and depth >= 3 and is_quiet and not board.is_check():
+                reduction = 1
+                # Even deeper reductions for later quiet moves
+                if i >= 6:
+                    reduction = 2
+            
+            # Search extension for check and important captures
             extension = 0
-            if hasattr(board, "gives_check") and board.gives_check(move):
+            if board.gives_check(move):
                 extension = 1
-            elif is_capture(board, move):
+            elif board.is_capture(move):
                 captured = board.piece_at(move.to_square)
                 if captured and captured.piece_type in (chess.QUEEN, chess.ROOK):
                     extension = 1
 
+            # Make the move and search
             board.push(move)
-            score = -self.bound(board, 1 - gamma, depth - 1 - reduction + extension)
+            score = -self.bound(board, 1-gamma, depth-1-reduction+extension)
             board.pop()
 
+            # Update best score
             if score > best:
                 best = score
+                best_move = move
+            
+            # Beta cutoff - update killer moves and history table
             if best >= gamma:
-                # Update killer moves and history heuristics.
-                self.killer_moves.setdefault(depth, []).append(move)
-                self.history_table[move] = self.history_table.get(move, 0) + depth * depth
-                self.tp_move[get_zobrist_key(board)] = move
+                if not board.is_capture(move):
+                    self.move_ordering.add_killer_move(move, depth)
+                self.move_ordering.update_history(board, move, depth)
                 break
-
+        
+        # Store results in transposition table
         if best >= gamma:
-            self.tp_score[key] = Entry(best, entry.upper)
+            self.tt.store(key, {"entry": Entry(best, entry_data.upper), "move": best_move})
+            # Also store the best move separately for PV retrieval
+            self.tt.store(str(get_zobrist_key(board)), {"move": best_move})
         else:
-            self.tp_score[key] = Entry(entry.lower, best)
+            self.tt.store(key, {"entry": Entry(entry_data.lower, best), "move": best_move})
+        
         return best
 
     def get_principal_variation(self, board, max_length=10):
         pv = []
         local_board = board.copy()
-        while True:
-            key = get_zobrist_key(local_board)
-            if key not in self.tp_move:
+        visited = set()  # Prevent cycles
+        
+        while len(pv) < max_length:
+            key = str(get_zobrist_key(local_board))
+            if key in visited:
+                break  # Avoid loops
+                
+            tt_entry = self.tt.retrieve(key)
+            if not tt_entry or "move" not in tt_entry or not tt_entry["move"]:
                 break
-            move = self.tp_move[key]
+                
+            move = tt_entry["move"]
             pv.append(move)
-            local_board.push(move)
-            if len(pv) >= max_length:
-                break
+            visited.add(key)
+            
+            try:
+                local_board.push(move)
+            except:
+                break  # Invalid move
+                
         return pv
 
     def search(self, board, max_depth=4):
