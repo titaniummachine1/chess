@@ -7,6 +7,7 @@ from collections import namedtuple
 import random
 from time import time
 from AI.search_improvement import ImprovedMoveOrdering
+from AI.transposition import BoundedTranspositionTable  # Add this import
 
 DEBUG = False
 
@@ -164,8 +165,10 @@ class Searcher:
         self.tt = BoundedTranspositionTable(capacity=2**20)
         self.nodes = 0
         self.use_incremental_eval = use_incremental_eval
+        self.killer_moves = {}    # key: depth -> list of moves causing beta cutoffs
+        self.history_table = {}   # key: move -> heuristic score
         self.move_ordering = ImprovedMoveOrdering()
-        self.search_board = None
+        self.search_board = None  # Internal board copy for search operations
 
     def move_ordering_score(self, board, move, depth):
         base = score_move(board, move)
@@ -350,7 +353,11 @@ class Searcher:
             if iteration >= 20:
                 print(f"[Warning] Aspiration window failed to converge at depth {depth}; using last score.")
             prev_score = score
-            best_move_found = self.tp_move.get(get_zobrist_key(self.search_board), None)
+            
+            # Get the best move from transposition table
+            tt_entry = self.tt.retrieve(str(get_zobrist_key(self.search_board)))
+            best_move_found = tt_entry["move"] if tt_entry and "move" in tt_entry else None
+            
             pv = self.get_principal_variation(self.search_board)
             if DEBUG:
                 print(f"[DEBUG] Depth: {depth}, Score: {score}, Best move: {best_move_found}, PV: {pv}")
