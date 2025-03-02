@@ -2,7 +2,8 @@
 Async wrapper for the chess engine - allows non-blocking search
 """
 import asyncio
-import threading
+import chess
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from AI.core_engine import ChessEngine
 
@@ -15,11 +16,14 @@ search_executor = ThreadPoolExecutor(max_workers=1)
 def run_search(board, depth):
     """Run the engine search in a separate thread"""
     try:
+        # Always use a copy of the board
+        board_copy = board.copy()
         engine = ChessEngine()
-        move = engine.search(board, depth)
+        move = engine.search(board_copy, depth)
         return move
     except Exception as e:
         print(f"Search error: {e}")
+        print(traceback.format_exc())  # Print full stack trace
         return None
 
 async def async_search(board, depth):
@@ -29,16 +33,25 @@ async def async_search(board, depth):
     print(f"Search started at depth {depth}")
     
     try:
+        # Make a copy of the board for thread safety
+        board_copy = board.copy()
+        
         loop = asyncio.get_running_loop()
         current_result = await loop.run_in_executor(
             search_executor,
-            lambda: run_search(board, depth)
+            lambda: run_search(board_copy, depth)
         )
         
-        print(f"Search completed, found move: {current_result}")
-        current_progress = "Search complete"
+        if current_result:
+            print(f"Search completed, found move: {current_result}")
+            current_progress = "Search complete"
+        else:
+            print("Search completed but no move was found")
+            current_progress = "No move found"
+            
     except Exception as e:
         print(f"Async search error: {e}")
+        print(traceback.format_exc())
         current_progress = f"Search error: {str(e)}"
         current_result = None
     finally:

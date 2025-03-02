@@ -8,7 +8,7 @@ PIECE_VALUES = {
     'B': (365, 297),
     'R': (479, 512),
     'Q': (1025, 929),
-    'K': (10000, 10000)  # King’s base is fixed; positional bonus is added later.
+    'K': (10000, 10000)  # King's base is fixed; positional bonus is added later.
 }
 
 # Midgame piece–square tables (white perspective), 64 values each.
@@ -139,23 +139,27 @@ piece_square_tables = {
     }
 }
 
-###############################################################################
-# Piece-Square Table Interpolation Module
-###############################################################################
-
-def flip_table_for_black(table):
+def flip_and_invert_table(table):
+    """
+    Flips a table vertically and inverts the values.
+    This ensures black's piece square table values are both flipped AND inverted.
+    """
+    # Split into rows
     rows = [table[i*8:(i+1)*8] for i in range(8)]
+    # Reverse the order of rows (flip vertically)
     rows.reverse()
-    return [val for row in rows for val in row]
+    # Invert values and flatten
+    return [-val for row in rows for val in row]
 
+# Create tables for black that are both flipped AND have inverted values
 flipped_piece_square_tables = {
-    "mg": {piece: flip_table_for_black(piece_square_tables["mg"][piece])
+    "mg": {piece: flip_and_invert_table(piece_square_tables["mg"][piece])
            for piece in piece_square_tables["mg"]},
-    "eg": {piece: flip_table_for_black(piece_square_tables["eg"][piece])
+    "eg": {piece: flip_and_invert_table(piece_square_tables["eg"][piece])
            for piece in piece_square_tables["eg"]}
 }
 
-# Phase weights for non-king pieces.
+# Phase weights for piece counting
 piece_phase = {
     'P': 0,
     'N': 1,
@@ -166,6 +170,7 @@ piece_phase = {
 }
 
 def compute_game_phase(board):
+    """Calculate game phase based on remaining pieces"""
     phase = 0
     for square, piece in board.piece_map().items():
         symbol = piece.symbol().upper()
@@ -176,13 +181,19 @@ def compute_game_phase(board):
     return phase / max_phase
 
 def interpolate_piece_square(piece, square, color, board):
+    """
+    Get the piece-square table value for a specific piece and square.
+    Properly handles both colors (white and black).
+    """
     phase_factor = compute_game_phase(board)
     key = piece.upper()
+    
+    # Important: For black pieces, we flip the board perspective AND invert the values
     if color == chess.WHITE:
         mg = piece_square_tables["mg"].get(key, [0]*64)[square]
         eg = piece_square_tables["eg"].get(key, [0]*64)[square]
     else:
-        # Use the precomputed flipped tables for black.
+        # For black, use the precomputed flipped AND inverted tables
         mg = flipped_piece_square_tables["mg"].get(key, [0]*64)[square]
         eg = flipped_piece_square_tables["eg"].get(key, [0]*64)[square]
     return mg * phase_factor + eg * (1 - phase_factor)
