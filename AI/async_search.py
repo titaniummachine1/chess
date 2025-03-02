@@ -1,7 +1,6 @@
 import asyncio
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from AI.search import best_move, Searcher
 from GameState.movegen import DrawbackBoard
 
 # Global state for async search
@@ -17,12 +16,12 @@ async def async_search(board, depth):
     print("Search started at depth", depth)
     try:
         # Create a new searcher instance for this search
-        searcher = Searcher()
+
         # Use the running loop to schedule the blocking search in the executor
         loop = asyncio.get_running_loop()
         current_result = await loop.run_in_executor(
             executor,
-            lambda: searcher.search(board, depth)
+
         )
         print(f"Search completed, found move: {current_result}")
         current_progress = "Search complete"

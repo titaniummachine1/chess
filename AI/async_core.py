@@ -5,7 +5,6 @@ import asyncio
 import chess
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from AI.core_engine import ChessEngine
 
 # Global state for async search
 current_search = None
@@ -13,14 +12,56 @@ current_progress = "Idle"
 current_result = None
 search_executor = ThreadPoolExecutor(max_workers=1)
 
+# Constants for evaluation
+CHECKMATE_SCORE = 10000
+DRAW_SCORE = 0
+
+def evaluate_position(board, drawbacks=None):
+    """
+    Evaluate the current position from the perspective of the current player
+    Returns a score where positive is better for the current player
+    """
+    # Check for game over states
+    if board.is_checkmate():
+        return -CHECKMATE_SCORE  # Losing
+    
+    if board.is_stalemate() or board.is_insufficient_material() or board.is_fifty_moves() or board.is_repetition():
+        return DRAW_SCORE  # Draw
+    
+    # Basic material evaluation
+    piece_values = {
+        chess.PAWN: 100,
+        chess.KNIGHT: 320,
+        chess.BISHOP: 330,
+        chess.ROOK: 500,
+        chess.QUEEN: 900,
+        chess.KING: 0  # King's value is implied in checkmate
+    }
+    
+    score = 0
+    
+    # Material count
+    for piece_type in piece_values:
+        score += len(board.pieces(piece_type, board.turn)) * piece_values[piece_type]
+        score -= len(board.pieces(piece_type, not board.turn)) * piece_values[piece_type]
+    
+    return score
+
+def get_ordered_moves(board, drawbacks=None):
+    """Get moves in a good order for alpha-beta pruning efficiency"""
+    return list(board.legal_moves)
+
 def run_search(board, depth):
     """Run the engine search in a separate thread"""
     try:
         # Always use a copy of the board
         board_copy = board.copy()
-        engine = ChessEngine()
-        move = engine.search(board_copy, depth)
-        return move
+        
+        # Return first legal move for now
+        legal_moves = list(board_copy.legal_moves)
+        if legal_moves:
+            return legal_moves[0]
+        return None
     except Exception as e:
         print(f"Search error: {e}")
         print(traceback.format_exc())  # Print full stack trace

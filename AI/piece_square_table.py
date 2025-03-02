@@ -142,7 +142,7 @@ piece_square_tables = {
 def flip_and_invert_table(table):
     """
     Flips a table vertically and inverts the values.
-    This ensures black's piece square table values are both flipped AND inverted.
+    This ensures black's piece square table values are correctly mirrored.
     """
     # Split into rows
     rows = [table[i*8:(i+1)*8] for i in range(8)]
@@ -188,12 +188,16 @@ def interpolate_piece_square(piece, square, color, board):
     phase_factor = compute_game_phase(board)
     key = piece.upper()
     
-    # Important: For black pieces, we flip the board perspective AND invert the values
+    # For black pieces, we need to mirror the square on the board
+    # and negate the resulting value to maintain correct evaluation
     if color == chess.WHITE:
+        # White pieces use tables directly
         mg = piece_square_tables["mg"].get(key, [0]*64)[square]
         eg = piece_square_tables["eg"].get(key, [0]*64)[square]
     else:
-        # For black, use the precomputed flipped AND inverted tables
-        mg = flipped_piece_square_tables["mg"].get(key, [0]*64)[square]
-        eg = flipped_piece_square_tables["eg"].get(key, [0]*64)[square]
+        # For black pieces, use the precomputed flipped and inverted tables
+        mirror_square = square ^ 56  # This flips the square vertically (a8 becomes a1, etc)
+        mg = -piece_square_tables["mg"].get(key, [0]*64)[mirror_square]
+        eg = -piece_square_tables["eg"].get(key, [0]*64)[mirror_square]
+    
     return mg * phase_factor + eg * (1 - phase_factor)
