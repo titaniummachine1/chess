@@ -5,6 +5,8 @@ both async_search.py and async_core.py into a single generic module.
 import asyncio
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+import random
+import chess
 
 # Choose which engine to use
 try:
@@ -25,15 +27,58 @@ current_result = None
 search_executor = ThreadPoolExecutor(max_workers=1)
 
 def run_search(board, depth):
-    """Run the engine search in a separate thread"""
+    """Run the engine search in a separate thread with comprehensive error handling"""
     try:
         # Always use a copy of the board for thread safety
         board_copy = board.copy()
         move = engine_best_move(board_copy, depth)
+        
+        # Validate the returned move
+        if move and move not in board.legal_moves:
+            print(f"WARNING: Engine returned illegal move: {move}")
+            # Find a fallback move
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                move = random.choice(legal_moves)
+                print(f"Using random legal move instead: {move}")
+            else:
+                move = None
+                
         return move
+    except TypeError as e:
+        # Most likely a Move comparison error
+        if "'<' not supported between instances of 'Move' and 'Move'" in str(e):
+            print("ERROR: Move comparison error in engine. This is likely due to improper sorting.")
+            print("Hint: Use 'sort(key=lambda x: x[0])' when sorting move tuples.")
+        else:
+            print(f"Type Error in search: {e}")
+        print(traceback.format_exc())
+        # Try to return any valid move as fallback
+        try:
+            legal_moves = list(board.legal_moves) 
+            if legal_moves:
+                move = random.choice(legal_moves)
+                print(f"Using emergency random move: {move}")
+                return move
+        except:
+            pass
+        return None
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"CRITICAL ERROR in engine search: {e}")
         print(traceback.format_exc())  # Print full stack trace
+        
+        # Last resort - try to find any legal move
+        try:
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                # Try to filter out obviously bad moves
+                central_moves = [m for m in legal_moves if chess.square_file(m.to_square) in [2, 3, 4, 5]]
+                safe_moves = central_moves if central_moves else legal_moves
+                move = random.choice(safe_moves)
+                print(f"Using emergency fallback move: {move}")
+                return move
+        except Exception as fallback_error:
+            print(f"Even fallback move selection failed: {fallback_error}")
         return None
 
 async def async_search(board, depth):

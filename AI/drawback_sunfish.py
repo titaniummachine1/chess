@@ -109,32 +109,36 @@ class DrawbackSunfish:
                     score = target_value - attacker_value/10
                     captures.append((score, move))
         
-        # Sort captures by score (best first)
-        captures.sort(reverse=True)
+        # FIXED: Sort captures by score using key parameter
+        captures.sort(key=lambda x: x[0], reverse=True)
         
         # Search captures
         for _, move in captures:
-            # Skip bad captures in late quiescence
-            if depth > 0:
-                # Skip capturing with higher value piece
-                victim = board.piece_at(move.to_square)
-                aggressor = board.piece_at(move.from_square)
-                if victim and aggressor:
-                    victim_symbol = victim.symbol().upper()
-                    aggressor_symbol = aggressor.symbol().upper()
-                    victim_value = PIECE_VALUES.get(victim_symbol, (0, 0))[0]
-                    aggressor_value = PIECE_VALUES.get(aggressor_symbol, (0, 0))[0]
-                    if aggressor_value > victim_value + 50:
-                        continue  # Skip obviously bad captures
-            
-            board_copy = board.copy()
-            board_copy.push(move)
-            score = -self.quiescence(board_copy, -beta, -alpha, depth + 1, max_depth)
-            
-            if score >= beta:
-                return beta
-            if score > alpha:
-                alpha = score
+            try:
+                # Skip bad captures in late quiescence
+                if depth > 0:
+                    # Skip capturing with higher value piece
+                    victim = board.piece_at(move.to_square)
+                    aggressor = board.piece_at(move.from_square)
+                    if victim and aggressor:
+                        victim_symbol = victim.symbol().upper()
+                        aggressor_symbol = aggressor.symbol().upper()
+                        victim_value = PIECE_VALUES.get(victim_symbol, (0, 0))[0]
+                        aggressor_value = PIECE_VALUES.get(aggressor_symbol, (0, 0))[0]
+                        if aggressor_value > victim_value + 50:
+                            continue  # Skip obviously bad captures
+                
+                board_copy = board.copy()
+                board_copy.push(move)
+                score = -self.quiescence(board_copy, -beta, -alpha, depth + 1, max_depth)
+                
+                if score >= beta:
+                    return beta
+                if score > alpha:
+                    alpha = score
+            except Exception as e:
+                print(f"Error in quiescence search with move {move}: {str(e)}")
+                continue  # Skip problematic moves instead of crashing
                 
         return alpha
     
@@ -267,50 +271,100 @@ class DrawbackSunfish:
     
     def search(self, board, depth, time_limit=5):
         """Iterative deepening search with time limit"""
-        self.nodes = 0
-        self.tt.clear()
-        self.history.clear()
-        self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
-        self.eval_cache.clear()
-        
-        start_time = time.time()
-        best_move = None
-        
-        # Iterative deepening
-        for d in range(1, depth + 1):
-            print(f"Searching at depth {d}...")
+        try:
+            self.nodes = 0
+            self.tt.clear()
+            self.history.clear()
+            self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
+            self.eval_cache.clear()
             
-            # Aspiration window
-            alpha = -MATE_UPPER
-            beta = MATE_UPPER
-            score = self.negamax(board, d, alpha, beta)
+            start_time = time.time()
+            best_move = None
             
-            # Get the best move from the TT
-            key = (board.fen(), d)
-            if key in self.tt and self.tt[key].move:
-                best_move = self.tt[key].move
+            # Iterative deepening
+            for d in range(1, depth + 1):
+                print(f"Searching at depth {d}...")
                 
-            # Print info
-            print(f"Depth: {d}, Score: {score}, Nodes: {self.nodes}, Best move: {best_move}")
-            
-            # Check if we're out of time
-            elapsed = time.time() - start_time
-            if elapsed >= time_limit:
-                print(f"Time limit reached: {elapsed:.2f}s")
-                break
-            
+                try:
+                    # Aspiration window
+                    alpha = -MATE_UPPER
+                    beta = MATE_UPPER
+                    score = self.negamax(board, d, alpha, beta)
+                    
+                    # Get the best move from the TT
+                    key = (board.fen(), d)
+                    if key in self.tt and self.tt[key].move:
+                        best_move = self.tt[key].move
+                        
+                    # Print info
+                    print(f"Depth: {d}, Score: {score}, Nodes: {self.nodes}, Best move: {best_move}")
+                except Exception as e:
+                    import traceback
+                    print(f"Error at depth {d}: {str(e)}")
+                    print(traceback.format_exc())
+                    # Don't break - continue to next depth
+                
+                # Check if we're out of time
+                elapsed = time.time() - start_time
+                if elapsed >= time_limit:
+                    print(f"Time limit reached: {elapsed:.2f}s")
+                    break
+                    
             # Need a minimum result or we're in trouble
-            if best_move is None and d >= 2:
-                print("Warning: No best move found!")
-                # Pick a random legal move as fallback
+            if best_move is None:
+                print("Warning: No best move found! Selecting safest available move...")
                 moves = list(board.legal_moves)
-                if moves:
-                    best_move = random.choice(moves)
                 
-        # Return the best move
-        return best_move
+                # Try to find a reasonable move
+                if moves:
+                    # First try non-pawn moves to start developing
+                    non_pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
+                                      board.piece_at(m.from_square).piece_type != chess.PAWN]
+                    if non_pawn_moves and len(board.move_stack) < 10:
+                        # Prioritize development in opening
+                        best_move = random.choice(non_pawn_moves)
+                    else:
+                        # Safe central pawn moves
+                        pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
+                                     board.piece_at(m.from_square).piece_type == chess.PAWN]
+                        central_pawn_moves = [m for m in pawn_moves if chess.square_file(m.to_square) in [2, 3, 4, 5]]
+                        
+                        if central_pawn_moves:
+                            best_move = random.choice(central_pawn_moves)
+                        else:
+                            best_move = random.choice(moves)
+                            
+                print(f"Selected fallback move: {best_move}")
+                
+            return best_move
+        except Exception as e:
+            import traceback
+            print(f"CRITICAL ERROR in search function: {str(e)}")
+            print(traceback.format_exc())
+            
+            # Last-resort fallback - pick any legal move
+            moves = list(board.legal_moves)
+            if moves:
+                fallback_move = random.choice(moves)
+                print(f"Emergency fallback move: {fallback_move}")
+                return fallback_move
+            return None
 
 # For use as the main AI interface
 def best_move(board, depth):
-    engine = DrawbackSunfish()
-    return engine.search(board, depth)
+    try:
+        engine = DrawbackSunfish()
+        return engine.search(board.copy(), depth)
+    except Exception as e:
+        import traceback
+        print(f"ENGINE ERROR: {str(e)}")
+        print(traceback.format_exc())
+        
+        # Emergency fallback
+        try:
+            moves = list(board.legal_moves)
+            if moves:
+                return random.choice(moves)
+        except:
+            pass
+        return None
