@@ -183,26 +183,26 @@ def compute_game_phase(board):
 def interpolate_piece_square(piece, square, color, board):
     """
     Get the piece-square table value for a specific piece and square.
-    Properly handles both colors (white and black).
+    Properly inverts the perspective for black pieces.
     """
     key = piece  # The piece symbol ('P', 'N', etc.)
     phase = compute_game_phase(board)
     
-    # Handle different perspective for black pieces
     if color == chess.WHITE:
         # White pieces use tables directly
+        rank = chess.square_rank(square)
+        file = chess.square_file(square)
         mg_value = piece_square_tables["mg"].get(key, [0]*64)[square]
         eg_value = piece_square_tables["eg"].get(key, [0]*64)[square]
     else:
-        # For black pieces, flip the square vertically
-        # Files remain the same, but ranks are mirrored
+        # For black pieces, mirror the rank (not the file)
         rank = chess.square_rank(square)
         file = chess.square_file(square)
-        mirror_rank = 7 - rank
-        mirror_square = chess.square(file, mirror_rank)
-        # Also negate the value since tables are from white's perspective
-        mg_value = -piece_square_tables["mg"].get(key, [0]*64)[mirror_square]
-        eg_value = -piece_square_tables["eg"].get(key, [0]*64)[mirror_square]
+        mirror_square = chess.square(file, 7 - rank)
+        
+        # Use the mirrored square but DON'T negate the value - PSTs already value positions from each side's perspective
+        mg_value = piece_square_tables["mg"].get(key, [0]*64)[mirror_square]
+        eg_value = piece_square_tables["eg"].get(key, [0]*64)[mirror_square]
     
-    # Return interpolated value between midgame and endgame
+    # Interpolate between phases
     return mg_value * phase + eg_value * (1 - phase)
