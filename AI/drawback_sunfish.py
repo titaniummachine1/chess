@@ -216,8 +216,8 @@ class DrawbackSunfish:
             
             scored_moves.append((score, move))
         
-        # Sort moves by score
-        scored_moves.sort(reverse=True)
+        # FIX: Sort moves by score (first element in tuple) rather than comparing the tuples directly
+        scored_moves.sort(key=lambda x: x[0], reverse=True)
         
         # Variables to track best move and score
         best_score = -MATE_UPPER

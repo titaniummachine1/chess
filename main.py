@@ -19,15 +19,32 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Import AI async functions - UPDATED to use new modules
+# Import AI async functions - UPDATED to use the unified async handler
 try:
-    from AI.core_engine import best_move as core_best_move  # New core engine
-    from AI.async_core import start_search, get_progress, get_result, is_search_complete, reset_search
+    from AI.async_engine_handler import (
+        start_search,
+        get_progress,
+        get_result,
+        is_search_complete,
+        reset_search
+    )
     HAS_AI = True
-    print("Using new core chess engine.")
+    print("Using unified async engine handler")
 except ImportError:
-    print("Warning: AI module not available.")
-    HAS_AI = False
+    try:
+        # Fallback to the legacy engine if the unified handler isn't available
+        from AI.async_core import (
+            start_search,
+            get_progress,
+            get_result,
+            is_search_complete,
+            reset_search
+        )
+        HAS_AI = True
+        print("Using legacy async engine handler")
+    except ImportError:
+        print("Warning: AI module not available.")
+        HAS_AI = False
 
 # Game Settings
 WIDTH = 800
@@ -144,6 +161,7 @@ def handle_ai_turn(board):
     # If AI's turn and no search is in progress, start one
     if not search_in_progress:
         print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
+        # Use the unified async handler
         start_search(board, AI_DEPTH)
         search_in_progress = True
         return
@@ -270,7 +288,7 @@ async def async_main():
                 elif event.key == p.K_t:
                     open_tinker_panel(board)
                     
-        # Handle AI turn - non-blocking approach
+        # Handle AI turn - non-blocking approach with unified handler
         if not game_over:
             if (BLACK_AI and board.turn == chess.BLACK) or (WHITE_AI and board.turn == chess.WHITE):
                 handle_ai_turn(board)
