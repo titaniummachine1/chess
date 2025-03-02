@@ -19,10 +19,10 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Update AI module imports to use only the proper engine handler
+# Update AI module imports to use the engine handler with time_limit support
 try:
     from AI.drawback_sunfish import best_move
-    from AI.async_core import (
+    from AI.async_core import (  # Update this to use async_core which supports the time_limit parameter
         start_search,
         get_progress,
         get_result,
@@ -43,14 +43,15 @@ BOARD_Y_OFFSET = 80
 BOARD_X_OFFSET = 80
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
-FPS = 60
-AI_DEPTH = 3  # Increase from 3 to 4
+FPS = 30
+AI_DEPTH = 4  # Increase from 3 to 4
+TIME_LIMIT = 5  # Default time limit in seconds
 
 # Global state
 game_over = False
 winner_color = None
 flipped = False
-WHITE_AI = False
+WHITE_AI = True
 BLACK_AI = True
 ai_move_cooldown = 0
 tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
@@ -116,9 +117,14 @@ def draw_tinker_button(screen):
     screen.blit(text, text_rect)
 
 def open_tinker_panel(board):
-    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH
+    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, TIME_LIMIT
     if HAS_TINKER_PANEL:
-        ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH}
+        ai_settings = {
+            "WHITE_AI": WHITE_AI, 
+            "BLACK_AI": BLACK_AI, 
+            "AI_DEPTH": AI_DEPTH,
+            "TIME_LIMIT": TIME_LIMIT
+        }
         tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
         result = tinker_panel.run()
         if result:
@@ -126,6 +132,7 @@ def open_tinker_panel(board):
             WHITE_AI = updated_ai_settings["WHITE_AI"]
             BLACK_AI = updated_ai_settings["BLACK_AI"]
             AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
+            TIME_LIMIT = updated_ai_settings.get("TIME_LIMIT", TIME_LIMIT)
             if options.get("FLIP_BOARD", False):
                 flipped = not flipped
                 print("Board flipped from Tinker Panel")
@@ -164,13 +171,14 @@ def handle_ai_turn(board):
         if len(board.move_stack) > 20:  # In middlegame
             adjusted_depth += 1  # Search deeper in middlegame positions
         
-        print(f"[DEBUG] Starting AI search at depth {adjusted_depth}")
+        print(f"[DEBUG] Starting AI search for {'White' if board.turn else 'Black'} at depth {adjusted_depth}, time limit {TIME_LIMIT}s")
         print(f"[DEBUG] Active drawback: {active_drawback}")
         print(f"[DEBUG] Current position: {board.fen()}")
         
-        # Use the unified async handler
+        # Use the unified async handler with time limit
         try:
-            start_search(board, adjusted_depth)
+            # Pass the time limit to start_search
+            start_search(board, adjusted_depth, TIME_LIMIT)
             search_in_progress = True
             print("[DEBUG] Search task started successfully")
         except Exception as e:

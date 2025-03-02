@@ -54,18 +54,18 @@ def get_ordered_moves(board, drawbacks=None):
     """Get moves in a good order for alpha-beta pruning efficiency"""
     return list(board.legal_moves)
 
-def run_search(board, depth):
+def run_search(board, depth, time_limit=5):
     """Run the engine search in a separate thread with detailed logging"""
     try:
         start_time = time.time()
-        print(f"Search started at depth {depth}")
+        print(f"Search started at depth {depth}, time limit {time_limit}s")
         
         # Always use a copy of the board
         board_copy = board.copy()
         
         # Create search engine instance and run actual search
         engine = DrawbackSunfish()
-        best_move = engine.search(board_copy, depth, time_limit=5)
+        best_move = engine.search(board_copy, depth, time_limit)
         
         # Simple completion info without excessive debug output
         elapsed = time.time() - start_time
@@ -77,11 +77,11 @@ def run_search(board, depth):
         print(traceback.format_exc())  # Print full stack trace
         return None
 
-async def async_search(board, depth):
+async def async_search(board, depth, time_limit=5):
     """Run the chess engine search asynchronously"""
     global current_progress, current_result
     current_progress = f"Searching at depth {depth}..."
-    print(f"Search started at depth {depth}")
+    print(f"Search started at depth {depth}, time limit {time_limit}s")
     
     try:
         # Make a copy of the board for thread safety
@@ -90,7 +90,7 @@ async def async_search(board, depth):
         loop = asyncio.get_running_loop()
         current_result = await loop.run_in_executor(
             search_executor,
-            lambda: run_search(board_copy, depth)
+            lambda: run_search(board_copy, depth, time_limit)
         )
         
         if current_result:
@@ -107,7 +107,7 @@ async def async_search(board, depth):
     finally:
         print("Search task finished")
 
-def start_search(board, depth):
+def start_search(board, depth, time_limit=5):
     """Start a new async search task"""
     global current_search, current_progress
     
@@ -121,9 +121,9 @@ def start_search(board, depth):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-    current_search = asyncio.create_task(async_search(board, depth))
-    current_progress = f"Search started at depth {depth}..."
-    print(f"Created new search task at depth {depth}")
+    current_search = asyncio.create_task(async_search(board, depth, time_limit))
+    current_progress = f"Search started at depth {depth}, time limit {time_limit}s..."
+    print(f"Created new search task at depth {depth}, time limit {time_limit}s")
 
 def get_progress():
     """Get the current search progress description"""

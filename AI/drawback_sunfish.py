@@ -30,14 +30,13 @@ class DrawbackSunfish:
         self.eval_cache = {}  # Cache for position evaluations
         
     def evaluate_position(self, board, drawbacks=None):
-        """Improved evaluation function with proper piece-square table values"""
+        """Improved evaluation function using pre-computed piece-square tables"""""
         # Check cache first
         key = board.fen()
         if key in self.eval_cache:
             return self.eval_cache[key]
         
-        # Handle game-ending positions
-        # In Drawback chess, check for king capture
+        # Handle game-ending positions (king captures)
         white_has_king = False
         black_has_king = False
         
@@ -53,7 +52,10 @@ class DrawbackSunfish:
         if not black_has_king:
             return MATE_UPPER   # Black's king is gone - win for white
         
-        # Calculate standard evaluation (material + piece-square)
+        # Calculate game phase once per position
+        phase = compute_game_phase(board)
+        
+        # Material + piece-square evaluation
         score = 0
         
         # Process each piece on the board
@@ -61,26 +63,25 @@ class DrawbackSunfish:
             piece_symbol = piece.symbol().upper()
             piece_color = piece.color
             
-            # Get material value from PIECE_VALUES
+            # Get material value
             material_value = PIECE_VALUES.get(piece_symbol, (0, 0))
             mg_value, eg_value = material_value
             
-            # Get piece-square table bonus for this piece at this square
-            psq_score = interpolate_piece_square(piece_symbol, square, piece_color, board)
+            # Get piece-square table bonus with optimized lookup
+            psq_score = interpolate_piece_square(piece_symbol, square, piece_color, phase)
             
-            # Interpolate between midgame and endgame values based on phase
-            phase = compute_game_phase(board)
-            combined_value = mg_value * phase + eg_value * (1 - phase) + psq_score
+            # Material value
+            material_score = mg_value * phase + eg_value * (1 - phase)
+            total_value = material_score + psq_score
             
             # Add to score based on piece color
             if piece_color == chess.WHITE:
-                score += combined_value
+                score += total_value
             else:
-                score -= combined_value
+                score -= total_value
         
-        # Additional middlegame heuristics
-        # Development bonus (knights and bishops)
-        if len(board.move_stack) < 20:  # Early game
+        # Additional middlegame heuristicsuristics
+        # Development bonus (knights and bishops)ame
             white_knights = list(board.pieces(chess.KNIGHT, chess.WHITE))
             black_knights = list(board.pieces(chess.KNIGHT, chess.BLACK))
             white_bishops = list(board.pieces(chess.BISHOP, chess.WHITE))
@@ -109,21 +110,55 @@ class DrawbackSunfish:
             # Central pawn structure
             white_center_control = 0
             black_center_control = 0
-            center_squares = [chess.D4, chess.E4, chess.D5, chess.E5]
             
-            for square in center_squares:
+            # Core center squares
+            core_center = [chess.D4, chess.E4, chess.D5, chess.E5]
+            # Extended center squares
+            extended_center = [chess.C3, chess.D3, chess.E3, chess.F3, 
+                              chess.C4, chess.F4, chess.C5, chess.F5,
+                              chess.C6, chess.D6, chess.E6, chess.F6]
+            
+            # Bonus for occupying center with pawns (specifically)
+            for square in core_center:
                 piece = board.piece_at(square)
                 if piece:
                     if piece.color == chess.WHITE:
-                        white_center_control += 12
+                        if piece.piece_type == chess.PAWN:
+                            white_center_control += 25  # Increased bonus for pawns in center
+                        else:
+                            white_center_control += 15
                     else:
-                        black_center_control += 12
+                        if piece.piece_type == chess.PAWN:
+                            black_center_control += 25
+                        else:
+                            black_center_control += 15
                 else:
-                    # Check if this square is attacked
+                    # Check if this square is pawn-attacked
                     if board.is_attacked_by(chess.WHITE, square):
-                        white_center_control += 5
+                        white_center_control += 10  # Increased pawn attack bonus
                     if board.is_attacked_by(chess.BLACK, square):
-                        black_center_control += 5
+                        black_center_control += 10
+
+            # Bonus for extended center control
+            for square in extended_center:
+                if board.is_attacked_by(chess.WHITE, square):
+                    white_center_control += 5
+                if board.is_attacked_by(chess.BLACK, square):
+                    black_center_control += 5
+                    
+            # Opening penalty for undeveloped pawns
+            if len(board.move_stack) < 10:
+                # Check if d2/e2 pawns are still in place
+                if board.piece_at(chess.D2) and board.piece_at(chess.D2).piece_type == chess.PAWN:
+                    score -= 20  # Penalty for not moving d-pawn
+                if board.piece_at(chess.E2) and board.piece_at(chess.E2).piece_type == chess.PAWN:
+                    score -= 20  # Penalty for not moving e-pawn
+                    
+                # Same for black
+                if board.piece_at(chess.D7) and board.piece_at(chess.D7).piece_type == chess.PAWN:
+                    score += 20  # Penalty for not moving d-pawn (black perspective)
+                if board.piece_at(chess.E7) and board.piece_at(chess.E7).piece_type == chess.PAWN:
+                    score += 20  # Penalty for not moving e-pawn (black perspective)
             
             score += (white_center_control - black_center_control)
         
@@ -132,39 +167,6 @@ class DrawbackSunfish:
         self.eval_cache[key] = final_score
         return final_score
     
-    def quiescence(self, board, alpha, beta, depth=0, max_depth=5):
-        """Quiescence search to only evaluate quiet positions"""
-        self.nodes += 1
-        stand_pat = self.evaluate_position(board)
-        
-        # Stand pat cutoff
-        if stand_pat >= beta:
-            return beta
-        if alpha < stand_pat:
-            alpha = stand_pat
-            
-        # Maximum depth check
-        if depth >= max_depth:
-            return alpha
-            
-        # Generate and filter only captures
-        captures = []
-        for move in board.legal_moves:
-            if board.is_capture(move):
-                # Score captures by MVV-LVA
-                target = board.piece_at(move.to_square)
-                attacker = board.piece_at(move.from_square)
-                if target and attacker:  # Make sure pieces exist
-                    target_symbol = target.symbol().upper()
-                    attacker_symbol = attacker.symbol().upper()
-                    target_value = PIECE_VALUES.get(target_symbol, (0, 0))[0]
-                    attacker_value = PIECE_VALUES.get(attacker_symbol, (0, 0))[0]
-                    score = target_value - attacker_value/10
-                    captures.append((score, move))
-        
-        # FIXED: Sort captures by score using key parameter
-        captures.sort(key=lambda x: x[0], reverse=True)
-        
         # Search captures
         for _, move in captures:
             try:
@@ -250,6 +252,17 @@ class DrawbackSunfish:
             if opponent_king_square and move.to_square == opponent_king_square:
                 score = 20000000
                 
+            # Improve move ordering for opening: prioritize central pawn moves
+            if len(board.move_stack) < 15:  # Only in opening
+                from_piece = board.piece_at(move.from_square)
+                if from_piece and from_piece.piece_type == chess.PAWN:
+                    # Central pawn advances get a bonus
+                    from_file = chess.square_file(move.from_square)
+                    if from_file in [3, 4]:  # d and e files
+                        score += 400000
+                    elif from_file in [2, 5]:  # c and f files
+                        score += 300000
+            
             # Check if this is a capture move
             capture_value = 0
             if board.is_capture(move):
@@ -421,10 +434,10 @@ class DrawbackSunfish:
             return None
 
 # For use as the main AI interface
-def best_move(board, depth):
+def best_move(board, depth, time_limit=5):
     try:
         engine = DrawbackSunfish()
-        return engine.search(board.copy(), depth)
+        return engine.search(board.copy(), depth, time_limit)
     except Exception as e:
         import traceback
         print(f"ENGINE ERROR: {str(e)}")

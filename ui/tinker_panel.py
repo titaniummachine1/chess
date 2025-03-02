@@ -22,7 +22,7 @@ class TinkerPanel:
         self.callback = callback  # Callback to update the main game
         
         # AI control settings
-        self.ai_settings = ai_settings or {"WHITE_AI": False, "BLACK_AI": True, "AI_DEPTH": 3}
+        self.ai_settings = ai_settings or {"WHITE_AI": False, "BLACK_AI": True, "AI_DEPTH": 3, "TIME_LIMIT": 5}
         
         # Initialize Pygame if not already done
         if not p.get_init():
@@ -41,6 +41,11 @@ class TinkerPanel:
         self.bg_color = (50, 50, 50)
         self.text_color = (255, 255, 255)
         
+        # Add layout cursor for vertical positioning
+        self.left_y_cursor = 60   # Starting Y position for left side elements
+        self.right_y_cursor = 60  # Starting Y position for right side elements
+        self.center_y_cursor = 60 # Starting Y position for center elements
+        
         # Initialize UI components
         self._init_ui_components()
         
@@ -56,9 +61,30 @@ class TinkerPanel:
         # Results flags
         self.flip_board = False
     
+    def add_left_element(self, height, spacing=10):
+        """Add element to left side and return y position, then update cursor"""
+        y = self.left_y_cursor
+        self.left_y_cursor += height + spacing
+        return y
+        
+    def add_right_element(self, height, spacing=10):
+        """Add element to right side and return y position, then update cursor"""
+        y = self.right_y_cursor
+        self.right_y_cursor += height + spacing
+        return y
+        
+    def add_center_element(self, height, spacing=15):
+        """Add element to center area and return y position, then update cursor"""
+        y = self.center_y_cursor
+        self.center_y_cursor += height + spacing
+        return y
+    
     def _init_ui_components(self):
         """Initialize UI components like buttons, checkboxes, etc."""
-        # Action buttons
+        # Title takes up the first 50px
+        self.center_y_cursor = 50
+        
+        # Action buttons at the bottom
         self.close_button = Button(
             self.width/2 - 60, self.height - 60, 120, 40, "Close",
             bg_color=(150, 50, 50)
@@ -74,33 +100,61 @@ class TinkerPanel:
             bg_color=(150, 100, 0)
         )
         
-        # AI controls
+        # AI controls section
+        section_title_height = 30
+        checkbox_height = 25
+        slider_height = 60  # Height including label
+        
+        # Section title - Center
+        self.add_center_element(section_title_height)
+        
+        # AI Checkboxes - Split to left and right sides
+        white_ai_y = self.add_left_element(checkbox_height)
         self.white_ai_checkbox = Checkbox(
-            40, 60, 15, "AI Control", font=self.small_font
+            40, white_ai_y, 15, "AI Control", font=self.small_font
         )
         self.white_ai_checkbox.checked = self.ai_settings.get("WHITE_AI", False)
         
+        black_ai_y = self.add_right_element(checkbox_height)
         self.black_ai_checkbox = Checkbox(
-            int(self.width/2) + 30, 60, 15, "AI Control", font=self.small_font
+            int(self.width/2) + 30, black_ai_y, 15, "AI Control", font=self.small_font
         )
         self.black_ai_checkbox.checked = self.ai_settings.get("BLACK_AI", True)
         
-        # AI Depth slider - now goes up to 14
+        # AI Sliders - Center aligned with more space
+        depth_y = self.add_center_element(slider_height)
         self.ai_depth_slider = Slider(
-            self.width/2 - 120, 85, 240, 10, 1, 14,
+            self.width/2 - 120, depth_y, 240, 10, 1, 14,
             self.ai_settings.get("AI_DEPTH", 3),
             text="AI Depth"
         )
+        
+        time_y = self.add_center_element(slider_height)
+        self.time_limit_slider = Slider(
+            self.width/2 - 120, time_y, 240, 10, 1, 30,
+            self.ai_settings.get("TIME_LIMIT", 5),
+            text="Time Limit (sec)"
+        )
+        
+        # Add extra space before drawback lists
+        self.add_center_element(20)
+        
+        # Store the starting position for drawback lists
+        self.drawbacks_y_start = self.center_y_cursor
     
     def _init_drawback_lists(self):
         """Initialize the white and black drawback lists."""
+        # Use cursor system to position drawback lists below other UI elements
+        lists_y_start = self.drawbacks_y_start
+        lists_height = self.height - lists_y_start - 150  # Leave space for buttons at bottom
+        
         # Create drawback lists
         self.white_drawbacks = DrawbackList(
-            20, 110, int(self.width/2) - 30, self.height - 180, chess.WHITE, self.small_font
+            20, lists_y_start, int(self.width/2) - 30, lists_height, chess.WHITE, self.small_font
         )
         
         self.black_drawbacks = DrawbackList(
-            int(self.width/2) + 10, 110, int(self.width/2) - 30, self.height - 180, chess.BLACK, self.small_font
+            int(self.width/2) + 10, lists_y_start, int(self.width/2) - 30, lists_height, chess.BLACK, self.small_font
         )
         
         # Load current drawbacks from the board if available
@@ -164,6 +218,7 @@ class TinkerPanel:
         self.white_ai_checkbox.draw(self.window)
         self.black_ai_checkbox.draw(self.window)
         self.ai_depth_slider.draw(self.window)
+        self.time_limit_slider.draw(self.window)  # Draw the time limit slider
         
         # Draw drawback lists
         white_hover = self.white_drawbacks.draw(self.window)
@@ -232,6 +287,11 @@ class TinkerPanel:
             if self.ai_depth_slider.is_clicked(pos):
                 self.ai_depth_slider.start_drag(pos)
                 return True
+                
+            # Handle Time Limit slider
+            if self.time_limit_slider.is_clicked(pos):
+                self.time_limit_slider.start_drag(pos)
+                return True
             
             # Handle drawback list clicks - pass the board for immediate application
             if self.white_drawbacks.handle_click(pos, self.board):
@@ -246,11 +306,22 @@ class TinkerPanel:
                 self.ai_depth_slider.stop_drag()
                 self.ai_settings["AI_DEPTH"] = self.ai_depth_slider.value
                 return True
+                
+            # Handle Time Limit slider release
+            if self.time_limit_slider.is_dragging:
+                self.time_limit_slider.stop_drag()
+                self.ai_settings["TIME_LIMIT"] = self.time_limit_slider.value
+                return True
         
         elif event.type == p.MOUSEMOTION:
             # Handle AI depth slider drag
             if self.ai_depth_slider.is_dragging:
                 self.ai_depth_slider.update_drag(event.pos)
+                return True
+                
+            # Handle Time Limit slider drag
+            if self.time_limit_slider.is_dragging:
+                self.time_limit_slider.update_drag(event.pos)
                 return True
         
         elif event.type == p.KEYDOWN:

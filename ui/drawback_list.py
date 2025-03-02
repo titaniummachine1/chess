@@ -11,9 +11,15 @@ class DrawbackList:
         self.font = font or p.font.SysFont(None, 20)
         self.buttons = []
         self.search_box = SearchBox(
-            x + 20, y + 40, width - 40, 30, 
+            x + 20, y + 30, width - 40, 30, 
             f"Search {'White' if color == chess.WHITE else 'Black'} Drawbacks..."
         )
+        
+        # Add space between title, search box, and current selection
+        self.title_height = 20
+        self.search_height = 40  # Search box + padding
+        self.selection_height = 30
+        
         self.scroll_y = 0
         self.max_scroll = 0
         self.selected_drawback = None
@@ -35,7 +41,9 @@ class DrawbackList:
         # Create buttons for each drawback
         btn_height = 30
         spacing = 10
-        y_pos = self.rect.y + 100  # Start below search box
+        
+        # Start position for drawback buttons - below title, search box and selection info
+        y_pos = self.rect.y + self.title_height + self.search_height + self.selection_height
         
         for drawback in filtered_drawbacks:
             # Get display name
@@ -57,42 +65,57 @@ class DrawbackList:
             y_pos += btn_height + spacing
         
         # Calculate maximum scroll value
-        list_height = y_pos - (self.rect.y + 100)
-        self.max_scroll = max(0, list_height - self.rect.height + 150)
+        list_height = y_pos - (self.rect.y + self.title_height + self.search_height + self.selection_height)
+        self.max_scroll = max(0, list_height - (self.rect.height - self.title_height - self.search_height - self.selection_height - 20))
     
     def draw(self, surface):
         """Draw the drawback list with search box and buttons."""
+        # Draw background rectangle for the section
+        p.draw.rect(surface, (70, 70, 70), self.rect, 0, 5)  # Add rounded corners
+        
         # Draw title
         color_name = "White" if self.color == chess.WHITE else "Black"
         title = self.font.render(f"{color_name} Drawbacks", True, (255, 255, 255))
         surface.blit(title, (self.rect.x + 20, self.rect.y + 10))
         
-        # Draw current selection
-        selected_name = self.selected_drawback.replace('_', ' ').title() if self.selected_drawback else "None"
-        current_text = self.font.render(f"Current: {selected_name}", True, (255, 255, 255))
-        surface.blit(current_text, (self.rect.x + 20, self.rect.y + 70))
-        
         # Draw search box
         self.search_box.draw(surface)
         
+        # Draw current selection
+        y_pos = self.rect.y + self.title_height + self.search_height
+        selected_name = self.selected_drawback.replace('_', ' ').title() if self.selected_drawback else "None"
+        current_text = self.font.render(f"Current: {selected_name}", True, (255, 255, 255))
+        surface.blit(current_text, (self.rect.x + 20, y_pos))
+        
         # Draw scroll arrows if needed
         if self.max_scroll > 0:
-            # Up arrow
+            # Up arrow - positioned just below title area
             p.draw.polygon(surface, (200, 200, 200), [
-                (self.rect.x + 10, self.rect.y + 130),
-                (self.rect.x, self.rect.y + 150),
-                (self.rect.x + 20, self.rect.y + 150)
+                (self.rect.x + self.rect.width - 30, self.rect.y + self.title_height + self.search_height + self.selection_height + 10),
+                (self.rect.x + self.rect.width - 40, self.rect.y + self.title_height + self.search_height + self.selection_height + 25),
+                (self.rect.x + self.rect.width - 20, self.rect.y + self.title_height + self.search_height + self.selection_height + 25)
             ])
             
-            # Down arrow
+            # Down arrow - near bottom of rect
             p.draw.polygon(surface, (200, 200, 200), [
-                (self.rect.x + 10, self.rect.y + self.rect.height - 30),
-                (self.rect.x, self.rect.y + self.rect.height - 50),
-                (self.rect.x + 20, self.rect.y + self.rect.height - 50)
+                (self.rect.x + self.rect.width - 30, self.rect.y + self.rect.height - 20),
+                (self.rect.x + self.rect.width - 40, self.rect.y + self.rect.height - 35),
+                (self.rect.x + self.rect.width - 20, self.rect.y + self.rect.height - 35)
             ])
         
         # Draw buttons
         hover_description = None
+        
+        # Create a clipping rect for the buttons area
+        clip_rect = p.Rect(
+            self.rect.x, 
+            self.rect.y + self.title_height + self.search_height + self.selection_height,
+            self.rect.width, 
+            self.rect.height - self.title_height - self.search_height - self.selection_height
+        )
+        
+        old_clip = surface.get_clip()
+        surface.set_clip(clip_rect)
         
         for btn in self.buttons:
             was_drawn = btn.draw(surface, self.scroll_y)
@@ -101,6 +124,9 @@ class DrawbackList:
                 mouse_pos = p.mouse.get_pos()
                 if btn.is_clicked(mouse_pos, self.scroll_y):
                     hover_description = btn.description
+        
+        # Reset clipping
+        surface.set_clip(old_clip)
         
         return hover_description
     
