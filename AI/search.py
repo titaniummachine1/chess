@@ -82,19 +82,53 @@ def tactical_bonus(board, move):
     - Bonus if after move enemy king remains in check.
     """
     bonus = 0
-    # Use extra bonus if move gives check
+    
+    # Use extra bonus if move gives check - add null check
     if hasattr(board, "gives_check") and board.gives_check(move):
         bonus += 600  # extra bonus for check
-    # Bonus for capturing a high value piece (queen)
+    
+    # Bonus for capturing a high value piece (queen) - add null check
     captured = board.piece_at(move.to_square)
     if captured and captured.piece_type == chess.QUEEN:
         bonus += 800
-    # Simulate move to see if enemy king remains under pressure
-    board_copy = board.copy()
-    board_copy.push(move)
-    if board_copy.is_check():
-        bonus += 300
+    
+    # Simulate move to see if enemy king remains under pressure - with safer check
+    try:
+        board_copy = board.copy()
+        board_copy.push(move)
+        if board_copy.is_check():
+            bonus += 300
+    except Exception:
+        # Skip this part if any errors occur
+        pass
+        
     return bonus
+
+def opening_penalty(board, move):
+    """Penalize mistakes in the opening phase"""
+    penalty = 0
+    piece = board.piece_at(move.from_square)
+    
+    if not piece:
+        return 0
+        
+    # Strongly penalize early king moves (loses castling rights)
+    if piece.piece_type == chess.KING:
+        # Count pieces on board to determine opening/midgame state
+        piece_count = sum(1 for _ in board.piece_map())
+        if piece_count > 25:  # We're in the opening
+            # Only penalize if move isn't castling
+            if not board.is_castling(move):
+                penalty -= 1000
+                
+    # Penalize developing pawns to the edge in opening
+    if piece.piece_type == chess.PAWN:
+        # In opening, penalize a/h pawn moves
+        from_file = chess.square_file(move.from_square)
+        if from_file in (0, 7) and len(board.move_stack) < 10:
+            penalty -= 100
+            
+    return penalty
 
 def score_move(board, move):
     """
@@ -116,7 +150,6 @@ def score_move(board, move):
     # Reward moves that give check.
     if hasattr(board, "gives_check") and board.gives_check(move):
         score += 500
-    # Removed development bonus since piece–square tables handle development.
     # Add bonus for pawn moves that control center.
     score += central_control_bonus(board, move)
     # Extra bonus for pawn captures toward the center.
@@ -131,6 +164,8 @@ def score_move(board, move):
         score -= 500
     # Add extra tactical bonus to stack pressure.
     score += tactical_bonus(board, move)
+    # Add opening-specific penalties
+    score += opening_penalty(board, move)
     return score
 
 def has_immediate_king_capture(board, moves):
@@ -178,8 +213,14 @@ class Searcher:
 
     # NEW: helper to flip evaluation for side to move.
     def get_evaluation(self, board):
-        val = evaluation.evaluate(board)
-        return val if board.turn == chess.WHITE else -val
+        """Returns the evaluation score from the perspective of the side to move"""
+        val = evaluation.evaluate(board)  # This is always from White's perspective
+        
+        # If Black is to move, return negative of evaluation
+        # This ensures the score shows how good the position is for the player to move
+        if board.turn == chess.BLACK:
+            return -val
+        return val
 
     def quiescence(self, board, alpha, beta):
         stand_pat = self.get_evaluation(board)

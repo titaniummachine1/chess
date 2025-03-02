@@ -1,5 +1,6 @@
 import chess
 import numpy as np
+import random
 from collections import defaultdict
 
 # Static Exchange Evaluation (SEE) tables for better move evaluation
@@ -111,9 +112,13 @@ class ImprovedMoveOrdering:
     
     def sort_moves(self, board, moves, pv_move=None, depth=0):
         """Sort moves according to the scoring function"""
-        # Score moves
-        scored_moves = [(self.score_move(board, move, pv_move, depth), move) for move in moves]
+        # Score moves - add a small random factor to break ties
+        # This prevents direct comparison of Move objects
+        scored_moves = [(self.score_move(board, move, pv_move, depth) + random.random() * 0.001, move) 
+                        for move in moves]
+        
         # Sort by score in descending order
-        scored_moves.sort(reverse=True)
+        scored_moves.sort(reverse=True, key=lambda x: x[0])  # Use the first element (score) as the key
+        
         # Return just the moves
         return [move for _, move in scored_moves]
