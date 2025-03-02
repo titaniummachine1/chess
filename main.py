@@ -19,9 +19,10 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Import AI async functions - UPDATED to use the unified async handler
+# Update AI module imports to use only the proper engine handler
 try:
-    from AI.async_engine_handler import (
+    from AI.drawback_sunfish import best_move
+    from AI.async_core import (
         start_search,
         get_progress,
         get_result,
@@ -29,22 +30,10 @@ try:
         reset_search
     )
     HAS_AI = True
-    print("Using unified async engine handler")
+    print("Using Drawback Sunfish Engine")
 except ImportError:
-    try:
-        # Fallback to the legacy engine if the unified handler isn't available
-        from AI.async_core import (
-            start_search,
-            get_progress,
-            get_result,
-            is_search_complete,
-            reset_search
-        )
-        HAS_AI = True
-        print("Using legacy async engine handler")
-    except ImportError:
-        print("Warning: AI module not available.")
-        HAS_AI = False
+    print("Warning: AI chess engine not available.")
+    HAS_AI = False
 
 # Game Settings
 WIDTH = 800
@@ -55,7 +44,7 @@ BOARD_X_OFFSET = 80
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
 FPS = 60
-AI_DEPTH = 3
+AI_DEPTH = 3  # Increase from 3 to 4
 
 # Global state
 game_over = False
@@ -170,13 +159,18 @@ def handle_ai_turn(board):
     # If AI's turn and no search is in progress, start one
     if not search_in_progress:
         active_drawback = board.get_active_drawback(board.turn)
-        print(f"[DEBUG] Starting AI search for {'White' if board.turn else 'Black'} at depth {AI_DEPTH}")
+        # Adjust depth based on game phase
+        adjusted_depth = AI_DEPTH
+        if len(board.move_stack) > 20:  # In middlegame
+            adjusted_depth += 1  # Search deeper in middlegame positions
+        
+        print(f"[DEBUG] Starting AI search at depth {adjusted_depth}")
         print(f"[DEBUG] Active drawback: {active_drawback}")
         print(f"[DEBUG] Current position: {board.fen()}")
         
         # Use the unified async handler
         try:
-            start_search(board, AI_DEPTH)
+            start_search(board, adjusted_depth)
             search_in_progress = True
             print("[DEBUG] Search task started successfully")
         except Exception as e:

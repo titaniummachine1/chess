@@ -1,232 +1,150 @@
 """
-Asynchronous chess engine handler that manages search tasks and integrates with the opening book.
+Unified async handler for chess engines. This combines functionality from
+both async_search.py and async_core.py into a single generic module.
 """
 import asyncio
-import chess
-import time
-import random
+import traceback
 from concurrent.futures import ThreadPoolExecutor
-from .book_parser import OPENING_BOOK
-from .async_core import evaluate_position, get_ordered_moves, CHECKMATE_SCORE
-from .book_parser import get_opening_principle_move
+import random
+import chess
 
-# Book move bonus in centipawns
-BOOK_MOVE_BONUS = 100
+# Choose which engine to use
+try:
+    from AI.drawback_sunfish import best_move as engine_best_move
+    print("Using Drawback Sunfish Engine")
+except ImportError:
+    try:
+        from AI.core_engine import best_move as engine_best_move
+        print("Using Core Engine")
+    except ImportError:
+        from AI.search import best_move as engine_best_move
+        print("Using Legacy Engine")
 
-class AsyncEngineHandler:
-    """Handles asynchronous chess engine operations"""
-    
-    def __init__(self, engine_name="Unified Async Engine"):
-        self.engine_name = engine_name
-        self.current_task = None
-        self.executor = ThreadPoolExecutor(max_workers=1)
-        self.stop_search = False
+# Global state for async search
+current_search = None
+current_progress = "Idle"
+current_result = None
+search_executor = ThreadPoolExecutor(max_workers=1)
+
+def run_search(board, depth):
+    """Run the engine search in a separate thread with comprehensive error handling"""
+    try:
+        # Always use a copy of the board for thread safety
+        board_copy = board.copy()
+        move = engine_best_move(board_copy, depth)
         
-    async def get_best_move(self, board, depth=3, drawbacks=None):
-        """Find the best move for the given position using async search"""
-        self.stop_search = False
-        
-        print(f"[ENGINE] Starting search at depth {depth} with drawbacks: {drawbacks}")
-        
-        # Get book moves for logging and later bonus scoring
-        book_moves = OPENING_BOOK.get_book_moves(board)
-        if book_moves:
-            book_moves_uci = [move.uci() for move, freq in book_moves]
-            print(f"[ENGINE] Found book moves: {book_moves_uci}")
-            
-        # Check opening principles if early game
-        principle_move = None
-        if board.fullmove_number <= 10:
-            principle_move = get_opening_principle_move(board, drawbacks)
-            if principle_move:
-                side = "White" if board.turn else "Black"
-                print(f"[ENGINE] Found opening principle move for {side}: {principle_move.uci()}")
-        
-        # Create and run the search task
-        print(f"[ENGINE] Creating search task at depth {depth}")
-        task = asyncio.create_task(self._search_task(board, depth, drawbacks))
-        self.current_task = task
-        
+        # Validate the returned move
+        if move and move not in board.legal_moves:
+            print(f"WARNING: Engine returned illegal move: {move}")
+            # Find a fallback move
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                move = random.choice(legal_moves)
+                print(f"Using random legal move instead: {move}")
+            else:
+                move = None
+                
+        return move
+    except TypeError as e:
+        # Most likely a Move comparison error
+        if "'<' not supported between instances of 'Move' and 'Move'" in str(e):
+            print("ERROR: Move comparison error in engine. This is likely due to improper sorting.")
+            print("Hint: Use 'sort(key=lambda x: x[0])' when sorting move tuples.")
+        else:
+            print(f"Type Error in search: {e}")
+        print(traceback.format_exc())
+        # Try to return any valid move as fallback
         try:
-            best_move = await task
-            print(f"[ENGINE] Search completed successfully")
-            # Print if the chosen move was from the book
-            if best_move and book_moves and any(best_move == bm[0] for bm in book_moves):
-                print(f"[ENGINE] Selected book move: {best_move.uci()} (with bonus evaluation)")
-            return best_move
-        except asyncio.CancelledError:
-            print("[ENGINE] Search task was cancelled")
-            # Return a valid move if search was interrupted
-            return self._get_emergency_move(board, drawbacks)
-    
-    def stop(self):
-        """Stop the current search"""
-        self.stop_search = True
-        if self.current_task and not self.current_task.done():
-            self.current_task.cancel()
-    
-    async def _search_task(self, board, depth, drawbacks):
-        """Asynchronous task to search for the best move"""
-        print(f"[ENGINE] Search started at depth {depth}")
+            legal_moves = list(board.legal_moves) 
+            if legal_moves:
+                move = random.choice(legal_moves)
+                print(f"Using emergency random move: {move}")
+                return move
+        except:
+            pass
+        return None
+    except Exception as e:
+        print(f"CRITICAL ERROR in engine search: {e}")
+        print(traceback.format_exc())  # Print full stack trace
         
-        # Run the search in a thread pool to avoid blocking
+        # Last resort - try to find any legal move
+        try:
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                # Try to filter out obviously bad moves
+                central_moves = [m for m in legal_moves if chess.square_file(m.to_square) in [2, 3, 4, 5]]
+                safe_moves = central_moves if central_moves else legal_moves
+                move = random.choice(safe_moves)
+                print(f"Using emergency fallback move: {move}")
+                return move
+        except Exception as fallback_error:
+            print(f"Even fallback move selection failed: {fallback_error}")
+        return None
+
+async def async_search(board, depth):
+    """Run the chess engine search asynchronously"""
+    global current_progress, current_result
+    current_progress = f"Searching at depth {depth}..."
+    print(f"Search started at depth {depth}")
+    
+    try:
+        # Make a copy of the board for thread safety
+        board_copy = board.copy()
+        
         loop = asyncio.get_running_loop()
-        best_move = await loop.run_in_executor(
-            self.executor, 
-            self._search_position, 
-            board, depth, drawbacks
+        current_result = await loop.run_in_executor(
+            search_executor,
+            lambda: run_search(board_copy, depth)
         )
         
-        print(f"[ENGINE] Search completed, found move: {best_move.uci()}")
-        return best_move
-    
-    def _search_position(self, board, depth, drawbacks):
-        """Actual search implementation"""
-        alpha = -CHECKMATE_SCORE
-        beta = CHECKMATE_SCORE
-        best_move = None
-        best_score = -CHECKMATE_SCORE * 2
-        
-        # Get ordered moves with book moves prioritized
-        ordered_moves = self._get_moves_with_book_priority(board, drawbacks)
-        book_moves = {move.uci(): freq for move, freq in OPENING_BOOK.get_book_moves(board)}
-        
-        print(f"[ENGINE] Searching {len(ordered_moves)} moves at depth {depth}")
-        
-        # Perform the search
-        for i, move in enumerate(ordered_moves):
-            if self.stop_search:
-                print("[ENGINE] Search stopped by request")
-                break
-                
-            is_book_move = move.uci() in book_moves
-            board.push(move)
+        if current_result:
+            print(f"Search completed, found move: {current_result}")
+            current_progress = "Search complete"
+        else:
+            print("Search completed but no move was found")
+            current_progress = "No move found"
             
-            # Search with negamax algorithm
-            print(f"[ENGINE] Analyzing move {i+1}/{len(ordered_moves)}: {move.uci()}" + 
-                  (" (book move)" if is_book_move else ""))
-            
-            score = -self._negamax(board, depth - 1, -beta, -alpha, drawbacks)
-            
-            # Apply book move bonus if applicable
-            if is_book_move:
-                score += BOOK_MOVE_BONUS
-                print(f"[ENGINE] Book move {move.uci()} got bonus: {score}")
-                
-            board.pop()
-            
-            print(f"[ENGINE] Move {move.uci()} evaluated to score: {score}")
-            
-            if score > best_score:
-                best_score = score
-                best_move = move
-                print(f"[ENGINE] New best move: {best_move.uci()} with score {best_score}")
-            
-            alpha = max(alpha, score)
-            if alpha >= beta:
-                print(f"[ENGINE] Alpha-beta cutoff at move {i+1}")
-                break
-        
-        # Fallback in case search was interrupted or no good move was found
-        if best_move is None:
-            best_move = self._get_emergency_move(board, drawbacks)
-            print(f"[ENGINE] Using emergency move: {best_move.uci()}")
-            
-        return best_move
-    
-    def _negamax(self, board, depth, alpha, beta, drawbacks):
-        """Negamax algorithm with alpha-beta pruning"""
-        # Check for terminal node or maximum depth
-        if depth == 0 or board.is_game_over():
-            return evaluate_position(board, drawbacks)
-        
-        best_score = -CHECKMATE_SCORE * 2
-        ordered_moves = get_ordered_moves(board, drawbacks)
-        
-        for move in ordered_moves:
-            if self.stop_search:
-                break
-                
-            board.push(move)
-            score = -self._negamax(board, depth - 1, -beta, -alpha, drawbacks)
-            board.pop()
-            
-            best_score = max(best_score, score)
-            alpha = max(alpha, score)
-            if alpha >= beta:
-                break
-                
-        return best_score
-    
-    def _get_moves_with_book_priority(self, board, drawbacks):
-        """Get moves ordered with book moves first"""
-        book_moves_with_freq = OPENING_BOOK.get_book_moves(board)
-        book_move_dict = {move.uci(): freq for move, freq in book_moves_with_freq}
-        
-        all_moves = list(board.legal_moves)
-        filtered_moves = []
-        
-        # Filter moves based on drawbacks
-        for move in all_moves:
-            # Check if move respects the drawbacks
-            if self._is_valid_with_drawbacks(board, move, drawbacks):
-                filtered_moves.append(move)
-        
-        # Sort moves with book moves first (by frequency), then other moves
-        def move_order_key(move):
-            if move.uci() in book_move_dict:
-                # Higher frequency book moves come first (negative value)
-                return -1000 - book_move_dict[move.uci()]  
-            # Other moves are ordered by standard evaluation
-            return 0
-            
-        filtered_moves.sort(key=move_order_key)
-        
-        if book_moves_with_freq:
-            print(f"[ENGINE] Ordered moves with book moves first: {[m.uci() for m in filtered_moves[:5]]}...")
-        
-        return filtered_moves
+    except Exception as e:
+        print(f"Async search error: {e}")
+        print(traceback.format_exc())
+        current_progress = f"Search error: {str(e)}"
+        current_result = None
+    finally:
+        print("Search task finished")
 
-    def _is_valid_with_drawbacks(self, board, move, drawbacks):
-        """Check if a move is valid considering the active drawbacks"""
-        if not drawbacks:
-            return True
-            
-        # Get the moving piece
-        piece = board.piece_at(move.from_square)
-        if piece is None:
-            return True
-            
-        piece_type = piece.piece_type
-        is_capture = board.is_capture(move)
-        
-        # Check specific drawbacks
-        if "no_knight_moves" in drawbacks and piece_type == chess.KNIGHT:
-            return False
-            
-        if "no_knight_captures" in drawbacks and piece_type == chess.KNIGHT and is_capture:
-            return False
-            
-        if "no_bishop_captures" in drawbacks and piece_type == chess.BISHOP and is_capture:
-            return False
-            
-        # Add other drawback checks as needed
-        
-        return True
+def start_search(board, depth):
+    """Start a new async search task"""
+    global current_search, current_progress
     
-    def _get_emergency_move(self, board, drawbacks):
-        """Get a safe move when search is interrupted"""
-        legal_moves = list(board.legal_moves)
-        if not legal_moves:
-            return None
+    if current_search and not current_search.done():
+        current_search.cancel()
+        print("Cancelled existing search")
         
-        # Try to find a capture or check first
-        for move in legal_moves:
-            if board.is_capture(move) or board.gives_check(move):
-                print(f"[ENGINE] Emergency move - found capture/check: {move.uci()}")
-                return move
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        # Otherwise return a random legal move
-        random_move = random.choice(legal_moves)
-        print(f"[ENGINE] Emergency move - using random move: {random_move.uci()}")
-        return random_move
+    current_search = asyncio.create_task(async_search(board, depth))
+    current_progress = f"Search started at depth {depth}..."
+    print(f"Created new search task at depth {depth}")
+
+def get_progress():
+    """Get the current search progress description"""
+    return current_progress
+
+def get_result():
+    """Get the completed search result"""
+    return current_result
+
+def is_search_complete():
+    """Check if the current search is complete"""
+    return current_search is not None and current_search.done()
+
+def reset_search():
+    """Reset the search state"""
+    global current_search, current_progress, current_result
+    current_search = None
+    current_progress = "Idle"
+    current_result = None

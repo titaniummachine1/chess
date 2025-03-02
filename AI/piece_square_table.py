@@ -185,19 +185,24 @@ def interpolate_piece_square(piece, square, color, board):
     Get the piece-square table value for a specific piece and square.
     Properly handles both colors (white and black).
     """
-    phase_factor = compute_game_phase(board)
-    key = piece.upper()
+    key = piece  # The piece symbol ('P', 'N', etc.)
+    phase = compute_game_phase(board)
     
-    # For black pieces, we need to mirror the square on the board
-    # and negate the resulting value to maintain correct evaluation
+    # Handle different perspective for black pieces
     if color == chess.WHITE:
         # White pieces use tables directly
-        mg = piece_square_tables["mg"].get(key, [0]*64)[square]
-        eg = piece_square_tables["eg"].get(key, [0]*64)[square]
+        mg_value = piece_square_tables["mg"].get(key, [0]*64)[square]
+        eg_value = piece_square_tables["eg"].get(key, [0]*64)[square]
     else:
-        # For black pieces, use the precomputed flipped and inverted tables
-        mirror_square = square ^ 56  # This flips the square vertically (a8 becomes a1, etc)
-        mg = -piece_square_tables["mg"].get(key, [0]*64)[mirror_square]
-        eg = -piece_square_tables["eg"].get(key, [0]*64)[mirror_square]
+        # For black pieces, flip the square vertically
+        # Files remain the same, but ranks are mirrored
+        rank = chess.square_rank(square)
+        file = chess.square_file(square)
+        mirror_rank = 7 - rank
+        mirror_square = chess.square(file, mirror_rank)
+        # Also negate the value since tables are from white's perspective
+        mg_value = -piece_square_tables["mg"].get(key, [0]*64)[mirror_square]
+        eg_value = -piece_square_tables["eg"].get(key, [0]*64)[mirror_square]
     
-    return mg * phase_factor + eg * (1 - phase_factor)
+    # Return interpolated value between midgame and endgame
+    return mg_value * phase + eg_value * (1 - phase)
