@@ -19,14 +19,22 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Import AI async functions
+# Import AI async functions - UPDATED to use new modules
 try:
-    from AI.search import best_move  # Legacy search if needed
-    from AI.async_search import start_search, get_progress, get_result, is_search_complete, reset_search
+    from AI.core_engine import best_move as core_best_move  # New core engine
+    from AI.async_core import start_search, get_progress, get_result, is_search_complete, reset_search
     HAS_AI = True
+    print("Using new core chess engine.")
 except ImportError:
-    print("Warning: AI module not available.")
-    HAS_AI = False
+    try:
+        # Fall back to old search if new one isn't available
+        from AI.search import best_move  # Legacy search if needed
+        from AI.async_search import start_search, get_progress, get_result, is_search_complete, reset_search
+        HAS_AI = True
+        print("Using legacy chess engine.")
+    except ImportError:
+        print("Warning: AI module not available.")
+        HAS_AI = False
 
 # Game Settings
 WIDTH = 800
