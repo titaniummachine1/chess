@@ -13,151 +13,164 @@ PIECE_VALUES = {
 
 # Midgame piece–square tables (white perspective), 64 values each.
 piece_square_tables = {
-    "mg": {
-        "P": [
-              0,   0,   0,   0,   0,   0,   0,   0,
-             50,  50,  50,  50,  50,  50,  50,  50,
-             10,  10,  20,  35,  35,  20,  10,  10,
-              0,   5,  10,  40,  40,  10,   5,   0,  # Increased d4/e4 values
-              0,   0,  20,  40,  40,  20,   0,   0,  # Increased d4/e4 values
-              5,  -5,  -5, -20, -20,  -5,  -5,   5,
-            -10,  10,  10, -50, -50,  10,  10, -10,  # Stronger penalty for not moving central pawns
-              0,   0,   0,   0,   0,   0,   0,   0
-        ],
-        "N": [
-            -40, -20,  -10,  -10,  -10,  -10, -20, -40,
-            -20,   0,    5,    5,    5,    5,   0, -20,
-            -10,   5,   10,   10,   10,   10,   5, -10,
-            -10,   5,   10,   15,   15,   10,   5, -10,
-            -10,   5,   10,   15,   15,   10,   5, -10,
-            -10,   5,   15,   10,   10,   15,   5, -10,
-            -20,   0,    5,    5,    5,    5,   0, -20,
-            -40, -20,  -10,  -10,  -10,  -10, -20, -40
-        ],
-        "B": [
-            -20, -10, -10, -10, -10, -10, -10, -20,
-            -10,   0,   0,   0,   0,   0,   0, -10,
-            -10,   0,   5,  10,  10,   5,   0, -10,
-            -10,   5,   5,  10,  10,   5,   5, -10,
-            -10,   0,  10,  10,  10,  10,   0, -10,
-            -10,  10,  10,  10,  10,  10,  10, -10,
-            -10,  15,   0,   0,   0,   0,  15, -10,
-            -20, -10, -10, -10, -10, -10, -10, -20
-        ],
-        "R": [
-             40, 40,  40,   0,   0,  40,  40, 40,
-             5,  15,  15,  50,  50,  15,  50,  5,
-             5,   0,   0,   0,   0,   0,   0,  5,
-             5,   0,   0,   0,   0,   0,   0,  5,
-             5,   0,   0,   0,   0,   0,   0,  5,
-             5,   0,   0,   0,   0,   0,   0,  5,
-             5,   0,   0,   0,   0,   0,   0,  5,
-             0,  -5,   5,   5,   5,   10,  -5,  0
-        ],
-        "Q": [
-            -20, -10, -10,  -5,  -5, -10, -10, -20,
-            -10,   0,   0,   0,   0,   0,   0, -10,
-            -10,   0,   5,   5,   5,   5,   0, -10,
-             -5,   0,   5,   5,   5,   5,   0,  -5,
-              0,   0,   5,   5,   5,   5,   0,  -5,
-            -10,   5,   5,   5,   5,   5,   0, -10,
-            -10,   0,   5,   0,   0,   0,   0, -10,
-            -20, -10, -10,  -5,  -5, -10, -10, -20
-        ],
-        "K": [
-            -120, -120, -120, -120, -120, -120, -120, -120,  # Increased penalties for moving king
-            -100, -100, -100, -100, -100, -100, -100, -100,
-            -80, -80, -80, -80, -80, -80, -80, -80,
-            -70, -70, -70, -70, -70, -70, -70, -70,
-            -60, -60, -60, -60, -60, -60, -60, -60,
-            -40, -40, -40, -40, -40, -40, -40, -40,
-              0,   0, -10, -30, -30, -10,   0,   0,
-             20,  40,  10,   0,   0,  10,  40,  20
-        ]
+    "white": {
+        "mg": {
+            "P": [
+                  0,   0,   0,   0,   0,   0,   0,   0,
+                 50,  50,  50,  50,  50,  50,  50,  50,
+                 10,  10,  20,  35,  35,  20,  10,  10,
+                  0,   5,  10,  40,  40,  10,   5,   0,  # Increased d4/e4 values
+                  0,   0,  20,  40,  40,  20,   0,   0,  # Increased d4/e4 values
+                  5,  -5,  -5, -20, -20,  -5,  -5,   5,
+                -10,  10,  10, -50, -50,  10,  10, -10,  # Stronger penalty for not moving central pawns
+                  0,   0,   0,   0,   0,   0,   0,   0
+            ],
+            "N": [
+                -40, -20,  -10,  -10,  -10,  -10, -20, -40,
+                -20,   0,    5,    5,    5,    5,   0, -20,
+                -10,   5,   10,   10,   10,   10,   5, -10,
+                -10,   5,   10,   15,   15,   10,   5, -10,
+                -10,   5,   10,   15,   15,   10,   5, -10,
+                -10,   5,   15,   10,   10,   15,   5, -10,
+                -20,   0,    5,    5,    5,    5,   0, -20,
+                -40, -20,  -10,  -10,  -10,  -10, -20, -40
+            ],
+            "B": [
+                -20, -10, -10, -10, -10, -10, -10, -20,
+                -10,   0,   0,   0,   0,   0,   0, -10,
+                -10,   0,   5,  10,  10,   5,   0, -10,
+                -10,   5,   5,  10,  10,   5,   5, -10,
+                -10,   0,  10,  10,  10,  10,   0, -10,
+                -10,  10,  10,  10,  10,  10,  10, -10,
+                -10,  15,   0,   0,   0,   0,  15, -10,
+                -20, -10, -10, -10, -10, -10, -10, -20
+            ],
+            "R": [
+                 40, 40,  40,   0,   0,  40,  40, 40,
+                 5,  15,  15,  50,  50,  15,  50,  5,
+                 5,   0,   0,   0,   0,   0,   0,  5,
+                 5,   0,   0,   0,   0,   0,   0,  5,
+                 5,   0,   0,   0,   0,   0,   0,  5,
+                 5,   0,   0,   0,   0,   0,   0,  5,
+                 5,   0,   0,   0,   0,   0,   0,  5,
+                 0,  -5,   5,   5,   5,   10,  -5,  0
+            ],
+            "Q": [
+                -20, -10, -10,  -5,  -5, -10, -10, -20,
+                -10,   0,   0,   0,   0,   0,   0, -10,
+                -10,   0,   5,   5,   5,   5,   0, -10,
+                 -5,   0,   5,   5,   5,   5,   0,  -5,
+                  0,   0,   5,   5,   5,   5,   0,  -5,
+                -10,   5,   5,   5,   5,   5,   0, -10,
+                -10,   0,   5,   0,   0,   0,   0, -10,
+                -20, -10, -10,  -5,  -5, -10, -10, -20
+            ],
+            "K": [
+                -120, -120, -120, -120, -120, -120, -120, -120,  # Increased penalties for moving king
+                -100, -100, -100, -100, -100, -100, -100, -100,
+                -80, -80, -80, -80, -80, -80, -80, -80,
+                -70, -70, -70, -70, -70, -70, -70, -70,
+                -60, -60, -60, -60, -60, -60, -60, -60,
+                -40, -40, -40, -40, -40, -40, -40, -40,
+                  0,   0, -10, -30, -30, -10,   0,   0,
+                 20,  50,  10,   0,   0,  10,  50,  20
+            ]
+        },
+        "eg": {
+            "P": [
+                  0,   0,   0,   0,   0,   0,   0,   0,
+                80,  85,  80,  80,  80,  80,  85,  80,
+                50,  55,  50,  50,  50,  50,  55,  50,
+                30,  35,  30,  30,  30,  30,  35,  30,
+                25,  20,  20,  20,  20,  20,  20,  25,
+                15,  10,  10,  10,  10,  10,  10,  15,
+                10,  10,  10,  10,  10,  10,  10,  10,
+                 0,   0,   0,   0,   0,   0,   0,   0
+            ],
+            "N": [
+                -50, -40, -30, -30, -30, -30, -40, -50,
+                -40, -20,   0,   0,   0,   0, -20, -40,
+                -30,   0,  10,  15,  15,  10,   0, -30,
+                -30,  10,  15,  20,  20,  15,  10, -30,
+                -30,   0,  15,  20,  20,  15,   0, -30,
+                -30,   5,  15,  15,  15,  15,   5, -30,
+                -40, -20,   0,   5,   5,   0, -20, -40,
+                -50, -40, -30, -30, -30, -30, -40, -50
+            ],
+            "B": [
+                -20, -10, -10, -10, -10, -10, -10, -20,
+                -10,   0,   0,   0,   0,   0,   0, -10,
+                -10,   0,   5,  10,  10,   5,   0, -10,
+                -10,   5,   5,  10,  10,   5,   5, -10,
+                -10,   0,  10,  10,  10,  10,   0, -10,
+                -10,  10,  10,  10,  10,  10,  10, -10,
+                -10,  10,   0,   0,   0,   0,  10, -10,
+                -20, -10, -10, -10, -10, -10, -10, -20
+            ],
+            "R": [
+                 40,  40,  40,   0,   0,  40,  40,  40,
+                  5,  10,  10,  10,  10,  10,  10,   5,
+                 -5,   0,   0,   0,   0,   0,   0,  -5,
+                 -5,   0,   0,   0,   0,   0,   0,  -5,
+                 -5,   0,   0,   0,   0,   0,   0,  -5,
+                 -5,   0,   0,   0,   0,   0,   0,  -5,
+                 -5,   0,   0,   0,   0,   0,   0,  -5,
+                  0,   0,  10,   5,   5,   10,  0,   0
+            ],
+            "Q": [
+                -20, -10, -10,  -5,  -5, -10, -10, -20,
+                -10,   0,   0,   0,   0,   0,   0, -10,
+                -10,   0,   5,   5,   5,   5,   0, -10,
+                 -5,   0,   5,   5,   5,   5,   0,  -5,
+                  0,   0,   5,   5,   5,   5,   0,  -5,
+                -10,   5,   5,   5,   5,   5,   0, -10,
+                -10,   0,   5,   0,   0,   0,   0, -10,
+                -20, -10, -10,  -5,  -5, -10, -10, -20
+            ],
+            "K": [
+                -50, -30, -30, -30, -30, -30, -30, -50,
+                -30, -20, -20, -20, -20, -20, -20, -30,
+                -30, -10,  -5,   0,   0, -5, -10, -30,
+                -30, -10,   0,  10,  10,   0, -10, -30,
+                -30, -10,   0,  10,  10,   0, -10, -30,
+                -30, -10,  -5,   0,   0,  -5, -10, -30,
+                -30, -20, -20, -20, -20, -20, -20, -30,
+                -50, -30, -30, -30, -30, -30, -30, -50
+            ]
+        }
     },
-    "eg": {
-        "P": [
-              0,   0,   0,   0,   0,   0,   0,   0,
-            80,  85,  80,  80,  80,  80,  85,  80,
-            50,  55,  50,  50,  50,  50,  55,  50,
-            30,  35,  30,  30,  30,  30,  35,  30,
-            25,  20,  20,  20,  20,  20,  20,  25,
-            15,  10,  10,  10,  10,  10,  10,  15,
-            10,  10,  10,  10,  10,  10,  10,  10,
-             0,   0,   0,   0,   0,   0,   0,   0
-        ],
-        "N": [
-            -50, -40, -30, -30, -30, -30, -40, -50,
-            -40, -20,   0,   0,   0,   0, -20, -40,
-            -30,   0,  10,  15,  15,  10,   0, -30,
-            -30,  10,  15,  20,  20,  15,  10, -30,
-            -30,   0,  15,  20,  20,  15,   0, -30,
-            -30,   5,  15,  15,  15,  15,   5, -30,
-            -40, -20,   0,   5,   5,   0, -20, -40,
-            -50, -40, -30, -30, -30, -30, -40, -50
-        ],
-        "B": [
-            -20, -10, -10, -10, -10, -10, -10, -20,
-            -10,   0,   0,   0,   0,   0,   0, -10,
-            -10,   0,   5,  10,  10,   5,   0, -10,
-            -10,   5,   5,  10,  10,   5,   5, -10,
-            -10,   0,  10,  10,  10,  10,   0, -10,
-            -10,  10,  10,  10,  10,  10,  10, -10,
-            -10,  10,   0,   0,   0,   0,  10, -10,
-            -20, -10, -10, -10, -10, -10, -10, -20
-        ],
-        "R": [
-             40,  40,  40,   0,   0,  40,  40,  40,
-              5,  10,  10,  10,  10,  10,  10,   5,
-             -5,   0,   0,   0,   0,   0,   0,  -5,
-             -5,   0,   0,   0,   0,   0,   0,  -5,
-             -5,   0,   0,   0,   0,   0,   0,  -5,
-             -5,   0,   0,   0,   0,   0,   0,  -5,
-             -5,   0,   0,   0,   0,   0,   0,  -5,
-              0,   0,  10,   5,   5,   10,  0,   0
-        ],
-        "Q": [
-            -20, -10, -10,  -5,  -5, -10, -10, -20,
-            -10,   0,   0,   0,   0,   0,   0, -10,
-            -10,   0,   5,   5,   5,   5,   0, -10,
-             -5,   0,   5,   5,   5,   5,   0,  -5,
-              0,   0,   5,   5,   5,   5,   0,  -5,
-            -10,   5,   5,   5,   5,   5,   0, -10,
-            -10,   0,   5,   0,   0,   0,   0, -10,
-            -20, -10, -10,  -5,  -5, -10, -10, -20
-        ],
-        "K": [
-            -50, -30, -30, -30, -30, -30, -30, -50,
-            -30, -20, -20, -20, -20, -20, -20, -30,
-            -30, -10,  -5,   0,   0, -5, -10, -30,
-            -30, -10,   0,  10,  10,   0, -10, -30,
-            -30, -10,   0,  10,  10,   0, -10, -30,
-            -30, -10,  -5,   0,   0,  -5, -10, -30,
-            -30, -20, -20, -20, -20, -20, -20, -30,
-            -50, -30, -30, -30, -30, -30, -30, -50
-        ]
-    }
+    "black": {}  # We'll populate this with precomputed values
 }
 
-def flip_and_invert_table(table):
-    """
-    Flips a table vertically and inverts the values.
-    This ensures black's piece square table values are correctly mirrored.
-    """
-    # Split into rows
-    rows = [table[i*8:(i+1)*8] for i in range(8)]
-    # Reverse the order of rows (flip vertically)
-    rows.reverse()
-    # Invert values and flatten
-    return [-val for row in rows for val in row]
+# Pre-compute the black piece tables by mirroring white tables
+def precompute_black_tables():
+    """Create flipped tables for black pieces to avoid runtime transformations"""
+    piece_square_tables["black"]["mg"] = {}
+    piece_square_tables["black"]["eg"] = {}
+    
+    for piece in piece_square_tables["white"]["mg"]:
+        piece_square_tables["black"]["mg"][piece] = []
+        piece_square_tables["black"]["eg"][piece] = []
+        
+        # For each position in the 8x8 board
+        for rank in range(8):
+            for file in range(8):
+                # Get original square index
+                sq = rank * 8 + file
+                # Get mirrored square index (flip rank)
+                mirror_rank = 7 - rank
+                mirror_sq = mirror_rank * 8 + file
+                
+                # Copy the value from the mirrored position
+                mg_value = piece_square_tables["white"]["mg"][piece][mirror_sq]
+                eg_value = piece_square_tables["white"]["eg"][piece][mirror_sq]
+                
+                # Add to black's table
+                piece_square_tables["black"]["mg"][piece].append(mg_value)
+                piece_square_tables["black"]["eg"][piece].append(eg_value)
 
-# Create tables for black that are both flipped AND have inverted values
-flipped_piece_square_tables = {
-    "mg": {piece: flip_and_invert_table(piece_square_tables["mg"][piece])
-           for piece in piece_square_tables["mg"]},
-    "eg": {piece: flip_and_invert_table(piece_square_tables["eg"][piece])
-           for piece in piece_square_tables["eg"]}
-}
+# Run the precomputation during module initialization
+precompute_black_tables()
 
 # Phase weights for piece counting
 piece_phase = {
@@ -180,29 +193,17 @@ def compute_game_phase(board):
     phase = min(phase, max_phase)
     return phase / max_phase
 
-def interpolate_piece_square(piece, square, color, board):
+def interpolate_piece_square(piece, square, color, phase):
     """
-    Get the piece-square table value for a specific piece and square.
-    Properly inverts the perspective for black pieces.
+    Get the piece-square table value using precomputed tables for each color.
+    Much faster than computing during evaluation.
     """
     key = piece  # The piece symbol ('P', 'N', etc.)
-    phase = compute_game_phase(board)
+    color_key = "white" if color == chess.WHITE else "black"
     
-    if color == chess.WHITE:
-        # White pieces use tables directly
-        rank = chess.square_rank(square)
-        file = chess.square_file(square)
-        mg_value = piece_square_tables["mg"].get(key, [0]*64)[square]
-        eg_value = piece_square_tables["eg"].get(key, [0]*64)[square]
-    else:
-        # For black pieces, mirror the rank (not the file)
-        rank = chess.square_rank(square)
-        file = chess.square_file(square)
-        mirror_square = chess.square(file, 7 - rank)
-        
-        # Use the mirrored square but DON'T negate the value - PSTs already value positions from each side's perspective
-        mg_value = piece_square_tables["mg"].get(key, [0]*64)[mirror_square]
-        eg_value = piece_square_tables["eg"].get(key, [0]*64)[mirror_square]
+    # Direct lookup without any transformation
+    mg_value = piece_square_tables[color_key]["mg"].get(key, [0]*64)[square]
+    eg_value = piece_square_tables[color_key]["eg"].get(key, [0]*64)[square]
     
     # Interpolate between phases
     return mg_value * phase + eg_value * (1 - phase)
