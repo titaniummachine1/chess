@@ -45,7 +45,7 @@ BOARD_X_OFFSET = 80
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
 FPS = 60
-AI_DEPTH = 4
+AI_DEPTH = 3
 
 # Global state
 game_over = False
