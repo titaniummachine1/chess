@@ -134,3 +134,32 @@ class OpeningBook:
 
 # Create a singleton instance that can be imported elsewhere
 OPENING_BOOK = OpeningBook()
+
+def get_opening_principle_move(board, drawbacks=None):
+    """
+    Get a good move based on opening principles when not in the opening book.
+    Returns a chess.Move object or None if no principle-based move is found.
+    """
+    # Simple opening principles implementation
+    if board.fullmove_number <= 10:
+        # Center control with pawns
+        if board.turn == chess.WHITE:
+            central_pawn_moves = ["e2e4", "d2d4"]
+            for move_uci in central_pawn_moves:
+                try:
+                    move = chess.Move.from_uci(move_uci)
+                    if move in board.legal_moves:
+                        return move
+                except ValueError:
+                    continue
+        
+        # Develop knights and bishops toward the center
+        for piece_type in [chess.KNIGHT, chess.BISHOP]:
+            for piece in board.pieces(piece_type, board.turn):
+                for move in board.legal_moves:
+                    if move.from_square == piece:
+                        # Check if it's not a capture (respecting potential drawbacks)
+                        if not board.is_capture(move):
+                            return move
+    
+    return None

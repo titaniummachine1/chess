@@ -67,6 +67,7 @@ ai_move_cooldown = 0
 tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
 search_in_progress = False
 AVAILABLE_DRAWBACKS = [
+    "none",  # No drawbacks (default)
     "no_knight_moves",
     "no_bishop_captures",
     "no_knight_captures",
@@ -74,12 +75,20 @@ AVAILABLE_DRAWBACKS = [
 ]
 
 def assign_random_drawbacks(board):
-    white_drawback = random.choice(AVAILABLE_DRAWBACKS)
-    black_drawback = random.choice(AVAILABLE_DRAWBACKS)
-    board.set_drawback(chess.WHITE, white_drawback)
-    board.set_drawback(chess.BLACK, black_drawback)
-    print(f"White drawback: {white_drawback}")
-    print(f"Black drawback: {black_drawback}")
+    # Set default drawbacks to none (for debugging engine)
+    white_drawback = "none"  # Default to none instead of random
+    black_drawback = "none"  # Default to none instead of random
+    
+    # If you want randomization, uncomment the following:
+    # white_drawback = random.choice(AVAILABLE_DRAWBACKS)
+    # black_drawback = random.choice(AVAILABLE_DRAWBACKS)
+    
+    # When drawback is "none", set it to None in the board
+    board.set_drawback(chess.WHITE, None if white_drawback == "none" else white_drawback)
+    board.set_drawback(chess.BLACK, None if black_drawback == "none" else black_drawback)
+    
+    print(f"White drawback: {white_drawback if white_drawback else 'None'}")
+    print(f"Black drawback: {black_drawback if black_drawback else 'None'}")
 
 def display_drawbacks(screen, board, flipped):
     font = p.font.SysFont(None, 22)
@@ -88,11 +97,11 @@ def display_drawbacks(screen, board, flipped):
     white_text = font.render(f"White: {white_drawback.replace('_',' ').title()}", True, p.Color("white"), p.Color("black"))
     black_text = font.render(f"Black: {black_drawback.replace('_',' ').title()}", True, p.Color("black"), p.Color("white"))
     if flipped:
-        screen.blit(black_text, (10, 10))
-        screen.blit(white_text, (10, HEIGHT - 30))
-    else:
         screen.blit(white_text, (10, 10))
         screen.blit(black_text, (10, HEIGHT - 30))
+    else:
+        screen.blit(black_text, (10, 10))
+        screen.blit(white_text, (10, HEIGHT - 30))
 
 def display_current_turn(screen, board):
     font = p.font.SysFont(None, 22)

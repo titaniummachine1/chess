@@ -15,13 +15,11 @@ async def async_search(board, depth):
     current_progress = "Starting search..."
     print("Search started at depth", depth)
     try:
-        # Create a new searcher instance for this search
-
         # Use the running loop to schedule the blocking search in the executor
         loop = asyncio.get_running_loop()
         current_result = await loop.run_in_executor(
             executor,
-
+            lambda: run_search(board, depth)  # Add this function call
         )
         print(f"Search completed, found move: {current_result}")
         current_progress = "Search complete"
@@ -31,6 +29,15 @@ async def async_search(board, depth):
         current_result = None
     finally:
         print("Search task finished")
+
+# Add this function if it doesn't exist elsewhere
+def run_search(board, depth):
+    """Run the engine search in a separate thread"""
+    # Simple search implementation
+    legal_moves = list(board.legal_moves)
+    if legal_moves:
+        return legal_moves[0]  # Return first legal move for now
+    return None
 
 def start_search(board, depth):
     """Start a new async search using asyncio.create_task."""

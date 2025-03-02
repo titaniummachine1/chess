@@ -26,34 +26,36 @@ class AsyncEngineHandler:
         """Find the best move for the given position using async search"""
         self.stop_search = False
         
-        # Check opening book first
+        print(f"[ENGINE] Starting search at depth {depth} with drawbacks: {drawbacks}")
+        
+        # Get book moves for logging and later bonus scoring
         book_moves = OPENING_BOOK.get_book_moves(board)
         if book_moves:
-            # Sort by frequency
-            book_moves.sort(key=lambda x: x[1], reverse=True)
-            best_book_move = book_moves[0][0]
-            print(f"Selected book move: {best_book_move.uci()}")
-            return best_book_move
+            book_moves_uci = [move.uci() for move, freq in book_moves]
+            print(f"[ENGINE] Found book moves: {book_moves_uci}")
             
-        # Check opening principles if not in book but early game
+        # Check opening principles if early game
+        principle_move = None
         if board.fullmove_number <= 10:
             principle_move = get_opening_principle_move(board, drawbacks)
             if principle_move:
                 side = "White" if board.turn else "Black"
-                print(f"Using opening principle move for {side}: {principle_move.uci()}")
-                return principle_move
+                print(f"[ENGINE] Found opening principle move for {side}: {principle_move.uci()}")
         
         # Create and run the search task
-        print(f"Created new search task at depth {depth}")
+        print(f"[ENGINE] Creating search task at depth {depth}")
         task = asyncio.create_task(self._search_task(board, depth, drawbacks))
         self.current_task = task
         
         try:
             best_move = await task
-            print(f"Search task finished")
+            print(f"[ENGINE] Search completed successfully")
+            # Print if the chosen move was from the book
+            if best_move and book_moves and any(best_move == bm[0] for bm in book_moves):
+                print(f"[ENGINE] Selected book move: {best_move.uci()} (with bonus evaluation)")
             return best_move
         except asyncio.CancelledError:
-            print("Search task was cancelled")
+            print("[ENGINE] Search task was cancelled")
             # Return a valid move if search was interrupted
             return self._get_emergency_move(board, drawbacks)
     
@@ -65,7 +67,7 @@ class AsyncEngineHandler:
     
     async def _search_task(self, board, depth, drawbacks):
         """Asynchronous task to search for the best move"""
-        print(f"Search started at depth {depth}")
+        print(f"[ENGINE] Search started at depth {depth}")
         
         # Run the search in a thread pool to avoid blocking
         loop = asyncio.get_running_loop()
@@ -75,7 +77,7 @@ class AsyncEngineHandler:
             board, depth, drawbacks
         )
         
-        print(f"Search completed, found move: {best_move.uci()}")
+        print(f"[ENGINE] Search completed, found move: {best_move.uci()}")
         return best_move
     
     def _search_position(self, board, depth, drawbacks):
@@ -87,27 +89,48 @@ class AsyncEngineHandler:
         
         # Get ordered moves with book moves prioritized
         ordered_moves = self._get_moves_with_book_priority(board, drawbacks)
+        book_moves = {move.uci(): freq for move, freq in OPENING_BOOK.get_book_moves(board)}
+        
+        print(f"[ENGINE] Searching {len(ordered_moves)} moves at depth {depth}")
         
         # Perform the search
-        for move in ordered_moves:
+        for i, move in enumerate(ordered_moves):
             if self.stop_search:
+                print("[ENGINE] Search stopped by request")
                 break
                 
+            is_book_move = move.uci() in book_moves
             board.push(move)
+            
+            # Search with negamax algorithm
+            print(f"[ENGINE] Analyzing move {i+1}/{len(ordered_moves)}: {move.uci()}" + 
+                  (" (book move)" if is_book_move else ""))
+            
             score = -self._negamax(board, depth - 1, -beta, -alpha, drawbacks)
+            
+            # Apply book move bonus if applicable
+            if is_book_move:
+                score += BOOK_MOVE_BONUS
+                print(f"[ENGINE] Book move {move.uci()} got bonus: {score}")
+                
             board.pop()
+            
+            print(f"[ENGINE] Move {move.uci()} evaluated to score: {score}")
             
             if score > best_score:
                 best_score = score
                 best_move = move
+                print(f"[ENGINE] New best move: {best_move.uci()} with score {best_score}")
             
             alpha = max(alpha, score)
             if alpha >= beta:
+                print(f"[ENGINE] Alpha-beta cutoff at move {i+1}")
                 break
         
         # Fallback in case search was interrupted or no good move was found
         if best_move is None:
-            return self._get_emergency_move(board, drawbacks)
+            best_move = self._get_emergency_move(board, drawbacks)
+            print(f"[ENGINE] Using emergency move: {best_move.uci()}")
             
         return best_move
     
@@ -137,19 +160,59 @@ class AsyncEngineHandler:
     
     def _get_moves_with_book_priority(self, board, drawbacks):
         """Get moves ordered with book moves first"""
-        book_moves = OPENING_BOOK.get_book_moves(board)
-        book_move_uci = [move.uci() for move, _ in book_moves]
+        book_moves_with_freq = OPENING_BOOK.get_book_moves(board)
+        book_move_dict = {move.uci(): freq for move, freq in book_moves_with_freq}
         
         all_moves = list(board.legal_moves)
+        filtered_moves = []
         
-        # Sort moves with book moves first, then by standard ordering
+        # Filter moves based on drawbacks
+        for move in all_moves:
+            # Check if move respects the drawbacks
+            if self._is_valid_with_drawbacks(board, move, drawbacks):
+                filtered_moves.append(move)
+        
+        # Sort moves with book moves first (by frequency), then other moves
         def move_order_key(move):
-            if move.uci() in book_move_uci:
-                return -1000  # Book moves come first
-            return 0  # Other moves follow standard ordering
+            if move.uci() in book_move_dict:
+                # Higher frequency book moves come first (negative value)
+                return -1000 - book_move_dict[move.uci()]  
+            # Other moves are ordered by standard evaluation
+            return 0
             
-        all_moves.sort(key=move_order_key)
-        return all_moves
+        filtered_moves.sort(key=move_order_key)
+        
+        if book_moves_with_freq:
+            print(f"[ENGINE] Ordered moves with book moves first: {[m.uci() for m in filtered_moves[:5]]}...")
+        
+        return filtered_moves
+
+    def _is_valid_with_drawbacks(self, board, move, drawbacks):
+        """Check if a move is valid considering the active drawbacks"""
+        if not drawbacks:
+            return True
+            
+        # Get the moving piece
+        piece = board.piece_at(move.from_square)
+        if piece is None:
+            return True
+            
+        piece_type = piece.piece_type
+        is_capture = board.is_capture(move)
+        
+        # Check specific drawbacks
+        if "no_knight_moves" in drawbacks and piece_type == chess.KNIGHT:
+            return False
+            
+        if "no_knight_captures" in drawbacks and piece_type == chess.KNIGHT and is_capture:
+            return False
+            
+        if "no_bishop_captures" in drawbacks and piece_type == chess.BISHOP and is_capture:
+            return False
+            
+        # Add other drawback checks as needed
+        
+        return True
     
     def _get_emergency_move(self, board, drawbacks):
         """Get a safe move when search is interrupted"""
@@ -160,7 +223,10 @@ class AsyncEngineHandler:
         # Try to find a capture or check first
         for move in legal_moves:
             if board.is_capture(move) or board.gives_check(move):
+                print(f"[ENGINE] Emergency move - found capture/check: {move.uci()}")
                 return move
         
         # Otherwise return a random legal move
-        return random.choice(legal_moves)
+        random_move = random.choice(legal_moves)
+        print(f"[ENGINE] Emergency move - using random move: {random_move.uci()}")
+        return random_move
