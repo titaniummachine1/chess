@@ -3,8 +3,11 @@ Async wrapper for the chess engine - allows non-blocking search
 """
 import asyncio
 import chess
+import time
+import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from AI.drawback_sunfish import DrawbackSunfish  # Proper import
 
 # Global state for async search
 current_search = None
@@ -52,18 +55,33 @@ def get_ordered_moves(board, drawbacks=None):
     return list(board.legal_moves)
 
 def run_search(board, depth):
-    """Run the engine search in a separate thread"""
+    """Run the engine search in a separate thread with detailed logging"""
     try:
+        start_time = time.time()
+        print(f"[DEBUG] Starting engine search at depth {depth}")
+        
         # Always use a copy of the board
         board_copy = board.copy()
         
-        # Return first legal move for now
-        legal_moves = list(board_copy.legal_moves)
-        if legal_moves:
-            return legal_moves[0]
-        return None
+        # Create search engine instance
+        engine = DrawbackSunfish()
+        
+        # Debug - show current position
+        print(f"[DEBUG] Searching position: {board_copy.fen()}")
+        print(f"[DEBUG] Legal moves: {[move.uci() for move in list(board_copy.legal_moves)[:5]]}...")
+        
+        # Actually run the search with the proper engine
+        best_move = engine.search(board_copy, depth, time_limit=5)
+        
+        # Debug information
+        elapsed = time.time() - start_time
+        print(f"[DEBUG] Search completed in {elapsed:.2f}s")
+        print(f"[DEBUG] Nodes searched: {engine.nodes}")
+        print(f"[DEBUG] Selected move: {best_move}")
+        
+        return best_move
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"[ERROR] Search error: {e}")
         print(traceback.format_exc())  # Print full stack trace
         return None
 
@@ -71,32 +89,35 @@ async def async_search(board, depth):
     """Run the chess engine search asynchronously"""
     global current_progress, current_result
     current_progress = f"Searching at depth {depth}..."
-    print(f"Search started at depth {depth}")
+    print(f"[DEBUG] Async search started at depth {depth}")
+    print(f"[DEBUG] Current thread: {threading.current_thread().name}")
     
     try:
         # Make a copy of the board for thread safety
         board_copy = board.copy()
         
+        print("[DEBUG] Scheduling search in executor...")
         loop = asyncio.get_running_loop()
         current_result = await loop.run_in_executor(
             search_executor,
             lambda: run_search(board_copy, depth)
         )
+        print("[DEBUG] Executor completed search task")
         
         if current_result:
-            print(f"Search completed, found move: {current_result}")
+            print(f"[DEBUG] Search completed successfully, found move: {current_result}")
             current_progress = "Search complete"
         else:
-            print("Search completed but no move was found")
+            print("[DEBUG] Search completed but no move was found!")
             current_progress = "No move found"
             
     except Exception as e:
-        print(f"Async search error: {e}")
+        print(f"[ERROR] Async search error: {e}")
         print(traceback.format_exc())
         current_progress = f"Search error: {str(e)}"
         current_result = None
     finally:
-        print("Search task finished")
+        print("[DEBUG] Search task finalized")
 
 def start_search(board, depth):
     """Start a new async search task"""

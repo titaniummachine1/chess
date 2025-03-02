@@ -143,35 +143,8 @@ class DrawbackSunfish:
                 
         return alpha
     
-    def order_moves(self, board, moves):
-        """Order moves for better pruning with book knowledge integration"""
-        scored_moves = []
-        
-        # Check if we have book moves for this position
-        book_moves = OPENING_BOOK.get_book_moves(board)
-        book_move_dict = {move: freq for move, freq in book_moves}
-        
-        for move in moves:
-            score = 0
-            
-            # Check if this is a book move - highest priority
-            if move in book_move_dict:
-                # Base score of 30000 plus frequency weighting
-                book_freq = book_move_dict[move]
-                score = 30000 + min(book_freq * 10, 1000)  # Cap at 1000 for very common moves
-                print(f"Found book move {move} with frequency {book_freq}")
-            
-            # ...existing ordering logic...
-            
-            # Store move and score
-            scored_moves.append((score, move))
-        
-        # Sort by score
-        scored_moves.sort(key=lambda x: x[0], reverse=True)
-        return [move for _, move in scored_moves]
-    
     def negamax(self, board, depth, alpha, beta, ply=0, null_ok=True):
-        """Negamax search with alpha-beta pruning and book integration"""
+        """Negamax search with alpha-beta pruning"""
         self.nodes += 1
         alpha_orig = alpha
         
@@ -199,21 +172,16 @@ class DrawbackSunfish:
             if null_value >= beta:
                 return beta
         
-        # Check if we have book moves for this position
+        # Check for book moves - we'll prioritize them but still evaluate them
         book_moves = OPENING_BOOK.get_book_moves(board)
-        if book_moves and len(board.move_stack) < 20:  # Only use book in first 20 moves
-            # Find the most popular book move
-            best_book_move = max(book_moves, key=lambda item: item[1])[0]
-            if best_book_move in board.legal_moves:
-                # Return immediately with a strong positive score
-                print(f"Using book move: {best_book_move}")
-                return 100, best_book_move
+        book_move_dict = {move: freq for move, freq in book_moves}
         
         # Move ordering:
-        # 1. TT move
-        # 2. Good captures (MVV/LVA)
-        # 3. Killer moves
-        # 4. History heuristic
+        # 1. Book moves (highest priority)
+        # 2. TT move
+        # 3. Good captures (MVV/LVA)
+        # 4. Killer moves
+        # 5. History heuristic
         moves = list(board.legal_moves)
         if not moves:
             # No legal moves - in our variant, might be a win for the opponent
@@ -235,9 +203,14 @@ class DrawbackSunfish:
         for move in moves:
             score = 0
             
-            # TT move gets highest priority
-            if tt_move and move == tt_move:
+            # Book move gets highest priority
+            if move in book_move_dict:
+                score = 30000 + book_move_dict[move]
+            
+            # TT move gets high priority
+            elif tt_move and move == tt_move:
                 score = 20000
+            
             # Capturing moves scored by MVV-LVA
             elif board.is_capture(move):
                 victim = board.piece_at(move.to_square)
@@ -248,11 +221,13 @@ class DrawbackSunfish:
                     victim_value = PIECE_VALUES.get(victim_symbol, (0, 0))[0]
                     aggressor_value = PIECE_VALUES.get(aggressor_symbol, (0, 0))[0]
                     score = 10 * victim_value - aggressor_value + 10000
+            
             # Killer moves
             if move == self.killers[ply][0]:
                 score = 9000
             elif move == self.killers[ply][1]:
                 score = 8000
+                
             # History heuristic
             score += self.history.get((board.turn, move.from_square, move.to_square), 0)
             
@@ -272,6 +247,12 @@ class DrawbackSunfish:
             
             # Recursive search with full window
             score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1)
+            
+            # Apply book move bonus if applicable, but only at the root
+            if ply == 0 and move in book_move_dict:
+                book_bonus = 100  # Centipawns bonus
+                score += book_bonus
+                print(f"Book move {move.uci()} gets {book_bonus}cp bonus, new score: {score}")
             
             # Update best score and move
             if score > best_score:
@@ -308,7 +289,7 @@ class DrawbackSunfish:
         return best_score
     
     def search(self, board, depth, time_limit=5):
-        """Iterative deepening search with time limit and book integration"""
+        """Iterative deepening search with time limit"""
         try:
             self.nodes = 0
             self.tt.clear()
@@ -318,43 +299,28 @@ class DrawbackSunfish:
             
             start_time = time.time()
             best_move = None
+            best_score = -MATE_UPPER
             
-            # First, check the opening book for exact position matches
-            book_moves = OPENING_BOOK.get_book_moves(board)
-            if book_moves and len(board.move_stack) < 20:  # Only use book in first 20 moves
-                # Select from book moves, with probability weighted by frequency
-                total_freq = sum(freq for _, freq in book_moves)
-                if total_freq > 0:
-                    # Filter to ensure only legal moves
-                    legal_book_moves = [(move, freq) for move, freq in book_moves if move in board.legal_moves]
-                    if legal_book_moves:
-                        # Use weighted random selection
-                        move_weights = [freq/total_freq for _, freq in legal_book_moves]
-                        selected_move = random.choices(
-                            [move for move, _ in legal_book_moves],
-                            weights=move_weights,
-                            k=1
-                        )[0]
-                        print(f"Selected book move: {selected_move}")
-                        return selected_move
+            # Check for book moves
+            book_moves = []
+            if len(board.move_stack) < 20:  # Only use book in first 20 moves
+                book_moves = OPENING_BOOK.get_book_moves(board)
+                if book_moves:
+                    print(f"Found book moves: {[move.uci() for move, _ in book_moves[:3]]}...")
             
-            # If no book move found or selected, try opening principles
+            # Check for opening principles
+            principle_move = None
             if len(board.move_stack) < 10:
-                # Apply opening principles based on color
                 if board.turn == chess.WHITE:
-                    # White opening principles
-                    best_move = self.apply_white_opening_principles(board)
-                    if best_move:
-                        print(f"Using opening principle move for White: {best_move}")
-                        return best_move
+                    principle_move = self.apply_white_opening_principles(board)
                 else:
-                    # Black opening principles
-                    best_move = self.apply_black_opening_principles(board)
-                    if best_move:
-                        print(f"Using opening principle move for Black: {best_move}")
-                        return best_move
+                    principle_move = self.apply_black_opening_principles(board)
+                    
+                if principle_move:
+                    print(f"Found opening principle: {principle_move}")
             
-            # Normal iterative deepening
+            # Always perform iterative deepening search
+            print(f"Starting actual search at depth {depth}")
             for d in range(1, depth + 1):
                 print(f"Searching at depth {d}...")
                 
@@ -367,48 +333,61 @@ class DrawbackSunfish:
                     # Get the best move from the TT
                     key = (board.fen(), d)
                     if key in self.tt and self.tt[key].move:
-                        best_move = self.tt[key].move
+                        move = self.tt[key].move
                         
+                        if best_move is None or score > best_score:
+                            best_move = move
+                            best_score = score
+                            
                     # Print info
                     print(f"Depth: {d}, Score: {score}, Nodes: {self.nodes}, Best move: {best_move}")
                 except Exception as e:
                     import traceback
                     print(f"Error at depth {d}: {str(e)}")
                     print(traceback.format_exc())
-                    # Don't break - continue to next depth
                 
                 # Check if we're out of time
                 elapsed = time.time() - start_time
                 if elapsed >= time_limit:
                     print(f"Time limit reached: {elapsed:.2f}s")
                     break
-                    
-            # Need a minimum result or we're in trouble
+            
+            # If we still don't have a move, use fallback methods
             if best_move is None:
-                print("Warning: No best move found! Selecting safest available move...")
-                moves = list(board.legal_moves)
+                # Try using a book move if available
+                if book_moves:
+                    best_book_move = max(book_moves, key=lambda x: x[1])[0]
+                    print(f"Using book move as fallback: {best_book_move}")
+                    best_move = best_book_move
                 
-                # Try to find a reasonable move
-                if moves:
-                    # First try non-pawn moves to start developing
-                    non_pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
-                                      board.piece_at(m.from_square).piece_type != chess.PAWN]
-                    if non_pawn_moves and len(board.move_stack) < 10:
-                        # Prioritize development in opening
-                        best_move = random.choice(non_pawn_moves)
-                    else:
-                        # Safe central pawn moves
-                        pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
-                                     board.piece_at(m.from_square).piece_type == chess.PAWN]
-                        central_pawn_moves = [m for m in pawn_moves if chess.square_file(m.to_square) in [2, 3, 4, 5]]
-                        
-                        if central_pawn_moves:
-                            best_move = random.choice(central_pawn_moves)
+                # Try using principle move if available
+                elif principle_move:
+                    print(f"Using principle move as fallback: {principle_move}")
+                    best_move = principle_move
+                    
+                # Last resort: pick a safe move
+                else:
+                    moves = list(board.legal_moves)
+                    if moves:
+                        # First try non-pawn moves to start developing
+                        non_pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
+                                        board.piece_at(m.from_square).piece_type != chess.PAWN]
+                        if non_pawn_moves and len(board.move_stack) < 10:
+                            # Prioritize development in opening
+                            best_move = random.choice(non_pawn_moves)
                         else:
-                            best_move = random.choice(moves)
+                            # Safe central pawn moves
+                            pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
+                                        board.piece_at(m.from_square).piece_type == chess.PAWN]
+                            central_pawn_moves = [m for m in pawn_moves if chess.square_file(m.to_square) in [2, 3, 4, 5]]
                             
-                print(f"Selected fallback move: {best_move}")
-                
+                            if central_pawn_moves:
+                                best_move = random.choice(central_pawn_moves)
+                            else:
+                                best_move = random.choice(moves)
+                    print("No best move found! Using fallback logic.")
+                    
+            print(f"Final move selected: {best_move}, Nodes searched: {self.nodes}")
             return best_move
         except Exception as e:
             import traceback

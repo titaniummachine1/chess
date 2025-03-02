@@ -169,14 +169,25 @@ def handle_ai_turn(board):
     
     # If AI's turn and no search is in progress, start one
     if not search_in_progress:
-        print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
+        active_drawback = board.get_active_drawback(board.turn)
+        print(f"[DEBUG] Starting AI search for {'White' if board.turn else 'Black'} at depth {AI_DEPTH}")
+        print(f"[DEBUG] Active drawback: {active_drawback}")
+        print(f"[DEBUG] Current position: {board.fen()}")
+        
         # Use the unified async handler
-        start_search(board, AI_DEPTH)
-        search_in_progress = True
+        try:
+            start_search(board, AI_DEPTH)
+            search_in_progress = True
+            print("[DEBUG] Search task started successfully")
+        except Exception as e:
+            print(f"[ERROR] Failed to start search: {e}")
+            import traceback
+            traceback.print_exc()
         return
     
     # If a search is already in progress, check if it's done
     if is_search_complete():
+        print("[DEBUG] Search completed, retrieving result...")
         move = get_result()
         if move is None:
             # No good move found, pick a random legal move
