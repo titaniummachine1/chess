@@ -30,7 +30,7 @@ class DrawbackSunfish:
         self.eval_cache = {}  # Cache for position evaluations
         
     def evaluate_position(self, board, drawbacks=None):
-        """Improved evaluation function using pre-computed piece-square tables"""""
+        """Improved evaluation function with better opening development strategy"""
         # Check cache first
         key = board.fen()
         if key in self.eval_cache:
@@ -80,8 +80,9 @@ class DrawbackSunfish:
             else:
                 score -= total_value
         
-        # Additional middlegame heuristicsuristics
-        # Development bonus (knights and bishops)ame
+        # Additional opening/middlegame heuristics
+        if len(board.move_stack) < 20:  # Early game
+            # Development bonus (knights and bishops)
             white_knights = list(board.pieces(chess.KNIGHT, chess.WHITE))
             black_knights = list(board.pieces(chess.KNIGHT, chess.BLACK))
             white_bishops = list(board.pieces(chess.BISHOP, chess.WHITE))
@@ -107,7 +108,7 @@ class DrawbackSunfish:
                     bishop_development -= 15
             score += bishop_development
             
-            # Central pawn structure
+            # Enhanced central pawn structure evaluation
             white_center_control = 0
             black_center_control = 0
             
@@ -167,6 +168,39 @@ class DrawbackSunfish:
         self.eval_cache[key] = final_score
         return final_score
     
+    def quiescence(self, board, alpha, beta, depth=0, max_depth=5):
+        """Quiescence search to only evaluate quiet positions"""
+        self.nodes += 1
+        stand_pat = self.evaluate_position(board)
+        
+        # Stand pat cutoff
+        if stand_pat >= beta:
+            return beta
+        if alpha < stand_pat:
+            alpha = stand_pat
+            
+        # Maximum depth check
+        if depth >= max_depth:
+            return alpha
+            
+        # Generate and filter only captures
+        captures = []
+        for move in board.legal_moves:
+            if board.is_capture(move):
+                # Score captures by MVV-LVA
+                target = board.piece_at(move.to_square)
+                attacker = board.piece_at(move.from_square)
+                if target and attacker:  # Make sure pieces exist
+                    target_symbol = target.symbol().upper()
+                    attacker_symbol = attacker.symbol().upper()
+                    target_value = PIECE_VALUES.get(target_symbol, (0, 0))[0]
+                    attacker_value = PIECE_VALUES.get(attacker_symbol, (0, 0))[0]
+                    score = target_value - attacker_value/10
+                    captures.append((score, move))
+        
+        # FIXED: Sort captures by score using key parameter
+        captures.sort(key=lambda x: x[0], reverse=True)
+        
         # Search captures
         for _, move in captures:
             try:
@@ -285,6 +319,7 @@ class DrawbackSunfish:
                 score = 9000
             elif move == self.killers[ply][1]:
                 score = 8000
+                
             # History heuristic
             score += self.history.get((board.turn, move.from_square, move.to_square), 0)
             
