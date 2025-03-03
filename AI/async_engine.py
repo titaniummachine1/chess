@@ -1,14 +1,14 @@
 """
-Unified async handler for chess engines - streamlined version
+Unified async handler for chess engines - combines functionality from all async modules and opening book
 """
 import asyncio
 import time
-import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 import random
 import chess
 from AI.drawback_sunfish import best_move as engine_best_move
+from AI.book_parser import get_book_move, is_book_position, BOOK_MOVE_BONUS
 
 # Global state for async search
 current_search = None
@@ -16,38 +16,68 @@ current_progress = "Idle"
 current_result = None
 search_executor = ThreadPoolExecutor(max_workers=1)
 
+# Simple opening book for standard openings
+def get_opening_book_move(board):
+    """Get standard opening moves for common starting positions"""
+    if len(board.move_stack) == 0:
+        # First moves as white
+        if board.turn == chess.WHITE:
+            for move_uci in ["e2e4", "d2d4"]:
+                try:
+                    move = chess.Move.from_uci(move_uci)
+                    if move in board.legal_moves:
+                        return move
+                except ValueError:
+                    pass
+    elif len(board.move_stack) == 1:
+        # First moves as black
+        if board.turn == chess.BLACK:
+            last_move = board.move_stack[-1]
+            if last_move.uci() == "e2e4":
+                e5 = chess.Move.from_uci("e7e5")
+                if e5 in board.legal_moves:
+                    return e5
+            elif last_move.uci() == "d2d4":
+                d5 = chess.Move.from_uci("d7d5")
+                if d5 in board.legal_moves:
+                    return d5
+    
+    return None
+
 def run_search(board, depth, time_limit=5):
-    """Run the engine search in a separate thread"""
+    """Run the engine search in a separate thread with opening book integration"""
     try:
         start_time = time.time()
-        print(f"Starting engine search at depth {depth}, time limit {time_limit}s")
         
         # Always use a copy of the board for thread safety
         board_copy = board.copy()
         
-        # Call the actual engine search with the time limit
+        # Check opening book first - now with improved opening book
+        book_move = get_book_move(board_copy)
+        if book_move:
+            print(f"Opening book move found: {book_move}")
+            return book_move
+        
+        # Check for king captures (checkmates in Drawback Chess)
+        for move in board_copy.legal_moves:
+            target = board_copy.piece_at(move.to_square)
+            if target and target.piece_type == chess.KING:
+                print("Found king capture (checkmate)!")
+                return move
+                
+        # Call the core engine search with the time limit
+        print(f"Starting regular search at depth {depth}, time limit {time_limit}s")
         move = engine_best_move(board_copy, depth, time_limit)
         
-        # Log results
         elapsed = time.time() - start_time
-        print(f"Search completed in {elapsed:.2f}s")
+        print(f"Search completed in {elapsed:.2f}s, found move: {move}")
         
-        # Validate the returned move
-        if move and move not in board.legal_moves:
-            print(f"WARNING: Engine returned illegal move: {move}")
-            # Find a fallback move
-            legal_moves = list(board.legal_moves)
-            if legal_moves:
-                move = random.choice(legal_moves)
-                print(f"Using random legal move instead: {move}")
-            else:
-                move = None
-                
         return move
     except Exception as e:
         print(f"Engine search error: {e}")
+        print(traceback.format_exc())
         
-        # Last resort - try to find any legal move
+        # Emergency fallback
         try:
             legal_moves = list(board.legal_moves)
             if legal_moves:
@@ -86,6 +116,7 @@ def start_search(board, depth, time_limit=5):
     """Start a new async search task"""
     global current_search, current_progress
     
+    # Cancel any existing search first
     if current_search and not current_search.done():
         current_search.cancel()
         print("Cancelled existing search")
@@ -97,7 +128,8 @@ def start_search(board, depth, time_limit=5):
         asyncio.set_event_loop(loop)
         
     current_search = asyncio.create_task(async_search(board, depth, time_limit))
-    current_progress = f"Thinking at depth {depth}, {time_limit}s limit..."
+    current_progress = f"Thinking at depth {depth}..."
+    print(f"[DEBUG] Search task started successfully")
 
 def get_progress():
     """Get the current search progress description"""
@@ -108,7 +140,6 @@ def get_result():
     return current_result
 
 def is_search_complete():
-    """Check if the current search is complete"""
     return current_search is not None and current_search.done()
 
 def reset_search():

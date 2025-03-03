@@ -8,7 +8,7 @@ DRAW_SCORE = 0
 def evaluate_position(board):
     """
     Core evaluation function that correctly applies material values and piece-square tables.
-    Returns a score from the perspective of the side to move.
+    Fixed to properly handle both White and Black perspectives.
     """
     # Check for special game endings
     if not any(True for _ in board.legal_moves):
@@ -66,6 +66,7 @@ def evaluate_position(board):
     score += evaluate_pawn_structure(board, phase)
     score += evaluate_development(board, phase)
     score += evaluate_center_control(board)
+    score += evaluate_opening_structure(board)  # New function to better handle opening pawn moves
     
     # Return score from the perspective of the side to move
     return score if board.turn == chess.WHITE else -score
@@ -168,5 +169,63 @@ def evaluate_center_control(board):
             score += 10
         if board.is_attacked_by(chess.BLACK, square):
             score -= 10
+    
+    return score
+
+def evaluate_opening_structure(board):
+    """Evaluate opening structure with stronger incentives for both colors"""
+    score = 0
+    move_count = len(board.move_stack)
+    
+    # Only apply in opening phase
+    if move_count > 15:
+        return 0
+        
+    # STRONGER penalties for not moving central pawns
+    # White penalties
+    if board.piece_at(chess.D2) and board.piece_at(chess.D2).piece_type == chess.PAWN:
+        score -= 100  # Much higher penalty for not moving d-pawn
+    if board.piece_at(chess.E2) and board.piece_at(chess.E2).piece_type == chess.PAWN:
+        score -= 100  # Much higher penalty for not moving e-pawn
+        
+    # Black penalties (note: for black, we ADD to score as penalties)
+    if board.piece_at(chess.D7) and board.piece_at(chess.D7).piece_type == chess.PAWN:
+        score += 100  # Much higher penalty for Black not moving d-pawn
+    if board.piece_at(chess.E7) and board.piece_at(chess.E7).piece_type == chess.PAWN:
+        score += 100  # Much higher penalty for Black not moving e-pawn
+    
+    # BONUS for having actually moved the central pawns
+    if board.piece_at(chess.D4) and board.piece_at(chess.D4).piece_type == chess.PAWN and board.piece_at(chess.D4).color == chess.WHITE:
+        score += 80  # Bonus for having d4
+    if board.piece_at(chess.E4) and board.piece_at(chess.E4).piece_type == chess.PAWN and board.piece_at(chess.E4).color == chess.WHITE:
+        score += 80  # Bonus for having e4
+        
+    if board.piece_at(chess.D5) and board.piece_at(chess.D5).piece_type == chess.PAWN and board.piece_at(chess.D5).color == chess.BLACK:
+        score -= 80  # Bonus for Black having d5
+    if board.piece_at(chess.E5) and board.piece_at(chess.E5).piece_type == chess.PAWN and board.piece_at(chess.E5).color == chess.BLACK:
+        score -= 80  # Bonus for Black having e5
+    
+    # FIX: Apply extra penalty for developing knights before central pawns
+    white_central_pawns_moved = not board.piece_at(chess.D2) or not board.piece_at(chess.E2)
+    black_central_pawns_moved = not board.piece_at(chess.D7) or not board.piece_at(chess.E7)
+    
+    # Count developed knights
+    white_knights_developed = 0
+    black_knights_developed = 0
+    
+    for knight in board.pieces(chess.KNIGHT, chess.WHITE):
+        if knight != chess.B1 and knight != chess.G1:
+            white_knights_developed += 1
+    
+    for knight in board.pieces(chess.KNIGHT, chess.BLACK):
+        if knight != chess.B8 and knight != chess.G8:
+            black_knights_developed += 1
+    
+    # Penalize if knights are developed but central pawns are not
+    if not white_central_pawns_moved and white_knights_developed > 0:
+        score -= white_knights_developed * 60
+    
+    if not black_central_pawns_moved and black_knights_developed > 0:
+        score += black_knights_developed * 60
     
     return score

@@ -19,20 +19,12 @@ except ImportError:
     print("Warning: pygame_gui not found. Tinker Panel disabled.")
     HAS_TINKER_PANEL = False
 
-# Update AI module imports to use the engine handler with time_limit support
+# Import AI async functions
 try:
-    from AI.drawback_sunfish import best_move
-    from AI.async_core import (  # Update this to use async_core which supports the time_limit parameter
-        start_search,
-        get_progress,
-        get_result,
-        is_search_complete,
-        reset_search
-    )
+    from AI.async_engine import start_search, get_progress, get_result, is_search_complete, reset_search
     HAS_AI = True
-    print("Using Drawback Sunfish Engine")
 except ImportError:
-    print("Warning: AI chess engine not available.")
+    print("Warning: AI module not available.")
     HAS_AI = False
 
 # Game Settings
@@ -43,21 +35,19 @@ BOARD_Y_OFFSET = 80
 BOARD_X_OFFSET = 80
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
-FPS = 30
-AI_DEPTH = 4  # Increase from 3 to 4
-TIME_LIMIT = 5  # Default time limit in seconds
+FPS = 60
+AI_DEPTH = 4
 
 # Global state
 game_over = False
 winner_color = None
 flipped = False
-WHITE_AI = True
+WHITE_AI = False
 BLACK_AI = True
 ai_move_cooldown = 0
 tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
 search_in_progress = False
 AVAILABLE_DRAWBACKS = [
-    "none",  # No drawbacks (default)
     "no_knight_moves",
     "no_bishop_captures",
     "no_knight_captures",
@@ -65,20 +55,12 @@ AVAILABLE_DRAWBACKS = [
 ]
 
 def assign_random_drawbacks(board):
-    # Set default drawbacks to none (for debugging engine)
-    white_drawback = "none"  # Default to none instead of random
-    black_drawback = "none"  # Default to none instead of random
-    
-    # If you want randomization, uncomment the following:
-    # white_drawback = random.choice(AVAILABLE_DRAWBACKS)
-    # black_drawback = random.choice(AVAILABLE_DRAWBACKS)
-    
-    # When drawback is "none", set it to None in the board
-    board.set_drawback(chess.WHITE, None if white_drawback == "none" else white_drawback)
-    board.set_drawback(chess.BLACK, None if black_drawback == "none" else black_drawback)
-    
-    print(f"White drawback: {white_drawback if white_drawback else 'None'}")
-    print(f"Black drawback: {black_drawback if black_drawback else 'None'}")
+    white_drawback = random.choice(AVAILABLE_DRAWBACKS)
+    black_drawback = random.choice(AVAILABLE_DRAWBACKS)
+    board.set_drawback(chess.WHITE, white_drawback)
+    board.set_drawback(chess.BLACK, black_drawback)
+    print(f"White drawback: {white_drawback}")
+    print(f"Black drawback: {black_drawback}")
 
 def display_drawbacks(screen, board, flipped):
     font = p.font.SysFont(None, 22)
@@ -87,11 +69,11 @@ def display_drawbacks(screen, board, flipped):
     white_text = font.render(f"White: {white_drawback.replace('_',' ').title()}", True, p.Color("white"), p.Color("black"))
     black_text = font.render(f"Black: {black_drawback.replace('_',' ').title()}", True, p.Color("black"), p.Color("white"))
     if flipped:
-        screen.blit(white_text, (10, 10))
-        screen.blit(black_text, (10, HEIGHT - 30))
-    else:
         screen.blit(black_text, (10, 10))
         screen.blit(white_text, (10, HEIGHT - 30))
+    else:
+        screen.blit(white_text, (10, 10))
+        screen.blit(black_text, (10, HEIGHT - 30))
 
 def display_current_turn(screen, board):
     font = p.font.SysFont(None, 22)
@@ -117,14 +99,9 @@ def draw_tinker_button(screen):
     screen.blit(text, text_rect)
 
 def open_tinker_panel(board):
-    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, TIME_LIMIT
+    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH
     if HAS_TINKER_PANEL:
-        ai_settings = {
-            "WHITE_AI": WHITE_AI, 
-            "BLACK_AI": BLACK_AI, 
-            "AI_DEPTH": AI_DEPTH,
-            "TIME_LIMIT": TIME_LIMIT
-        }
+        ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH}
         tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
         result = tinker_panel.run()
         if result:
@@ -132,7 +109,6 @@ def open_tinker_panel(board):
             WHITE_AI = updated_ai_settings["WHITE_AI"]
             BLACK_AI = updated_ai_settings["BLACK_AI"]
             AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
-            TIME_LIMIT = updated_ai_settings.get("TIME_LIMIT", TIME_LIMIT)
             if options.get("FLIP_BOARD", False):
                 flipped = not flipped
                 print("Board flipped from Tinker Panel")
@@ -165,31 +141,13 @@ def handle_ai_turn(board):
     
     # If AI's turn and no search is in progress, start one
     if not search_in_progress:
-        active_drawback = board.get_active_drawback(board.turn)
-        # Adjust depth based on game phase
-        adjusted_depth = AI_DEPTH
-        if len(board.move_stack) > 20:  # In middlegame
-            adjusted_depth += 1  # Search deeper in middlegame positions
-        
-        print(f"[DEBUG] Starting AI search for {'White' if board.turn else 'Black'} at depth {adjusted_depth}, time limit {TIME_LIMIT}s")
-        print(f"[DEBUG] Active drawback: {active_drawback}")
-        print(f"[DEBUG] Current position: {board.fen()}")
-        
-        # Use the unified async handler with time limit
-        try:
-            # Pass the time limit to start_search
-            start_search(board, adjusted_depth, TIME_LIMIT)
-            search_in_progress = True
-            print("[DEBUG] Search task started successfully")
-        except Exception as e:
-            print(f"[ERROR] Failed to start search: {e}")
-            import traceback
-            traceback.print_exc()
+        print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
+        start_search(board, AI_DEPTH)
+        search_in_progress = True
         return
     
     # If a search is already in progress, check if it's done
     if is_search_complete():
-        print("[DEBUG] Search completed, retrieving result...")
         move = get_result()
         if move is None:
             # No good move found, pick a random legal move
@@ -310,7 +268,7 @@ async def async_main():
                 elif event.key == p.K_t:
                     open_tinker_panel(board)
                     
-        # Handle AI turn - non-blocking approach with unified handler
+        # Handle AI turn - non-blocking approach
         if not game_over:
             if (BLACK_AI and board.turn == chess.BLACK) or (WHITE_AI and board.turn == chess.WHITE):
                 handle_ai_turn(board)

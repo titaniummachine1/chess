@@ -1,35 +1,36 @@
 """
 Drawback Sunfish - A chess engine inspired by Sunfish but adapted for Drawback Chess.
 Uses the DrawbackBoard move generation and existing piece square tables.
+Core engine logic with minimal dependencies.
 """
 import chess
 import time
 import random
-from collections import namedtuple, defaultdict
+from collections import namedtuple
 from GameState.movegen import DrawbackBoard
-from AI.piece_square_table import PIECE_VALUES, interpolate_piece_square, compute_game_phase
-from AI.evaluation import evaluate_position as eval_position  # Import the new evaluation function
+from AI.evaluation import evaluate_position as eval_position
+from AI.piece_square_table import PIECE_VALUES  # Add this import to fix undefined PIECE_VALUES
+from AI.book_parser import is_book_position, BOOK_MOVE_BONUS
+
 # Constants for search
 MATE_LOWER = 10000
 MATE_UPPER = 20000
-QS_LIMIT = 200  # Limit for quiescence search
-EVAL_ROUGHNESS = 15
 MAX_DEPTH = 20
+
 # Transposition table entry
 Entry = namedtuple('Entry', 'lower upper move')
-Entry = namedtuple('Entry', 'lower upper move')
+
 class DrawbackSunfish:
     """Chess engine inspired by Sunfish but using DrawbackBoard for move generation"""
-    """Chess engine inspired by Sunfish but using DrawbackBoard for move generation"""
+    
     def __init__(self):
         self.nodes = 0
-        self.tt = {}  # Transposition table: position -> (depth, score, flag, move)
-        self.history = {}  # Move history heuristicon -> (depth, score, flag, move)
+        self.tt = {}  # Transposition table
+        self.history = {}  # Move history heuristic
         self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Killer moves
-        self.eval_cache = {}  # Cache for position evaluations+ 1)]  # Killer moves
         self.eval_cache = {}  # Cache for position evaluations
+        
     def evaluate_position(self, board, drawbacks=None):
-        """Improved evaluation function with better opening development strategy"""
         """Use the dedicated evaluation function for more accurate results"""
         # Check cache first
         key = board.fen()
@@ -107,7 +108,7 @@ class DrawbackSunfish:
         return alpha
     
     def negamax(self, board, depth, alpha, beta, ply=0, null_ok=True):
-        """Enhanced negamax with improved move ordering and randomized equal moves"""
+        """Enhanced negamax with improved move ordering and book move prioritization"""
         self.nodes += 1
         alpha_orig = alpha
         
@@ -153,9 +154,23 @@ class DrawbackSunfish:
         
         # Move ordering - score moves deterministically first
         scored_moves = []
+        book_moves = []
+        from AI.book_parser import OPENING_BOOK
+        
+        # Get book moves for this position
+        book_move_list = OPENING_BOOK.get_book_moves(board)
+        book_move_dict = {move: weight for move, weight in book_move_list}
         
         for move in legal_moves:
             score = 0
+            
+            # Check if this move is in the opening book
+            if move in book_move_dict:
+                # Huge priority for book moves with bonus based on weight
+                weight = book_move_dict[move]
+                score = 50000000 + (weight * 10000)
+                book_moves.append((score, move))
+                continue
             
             # TT move gets high priority
             if tt_entry and move == tt_entry.move:
@@ -165,30 +180,42 @@ class DrawbackSunfish:
             if opponent_king_square and move.to_square == opponent_king_square:
                 score = 20000000
             
-            # In opening game, prioritize central pawn moves
+            # In opening game, prioritize central pawn moves for BOTH colors
             if len(board.move_stack) < 15:  
                 from_piece = board.piece_at(move.from_square)
                 if from_piece:
                     # Central pawn advances get a bonus
                     if from_piece.piece_type == chess.PAWN:
                         from_file = chess.square_file(move.from_square)
+                        from_rank = chess.square_rank(move.from_square)
                         to_file = chess.square_file(move.to_square)
+                        to_rank = chess.square_rank(move.to_square)
                         
-                        # Favor d2-d4, e2-e4 for white
-                        if board.turn == chess.WHITE:
-                            if from_file == 3 and to_file == 3:  # d2-d4
+                        # Common logic for both colors - central pawn moves
+                        if from_file in [3, 4]:  # d or e file
+                            # 2-square advance in opening gets huge bonus
+                            if abs(from_rank - to_rank) == 2:
+                                score += 1000000
+                            else:
                                 score += 800000
-                            elif from_file == 4 and to_file == 4:  # e2-e4
-                                score += 800000
-                        # Similarly for black
-                        else:
-                            if from_file == 3 and to_file == 3:  # d7-d5
-                                score += 800000
-                            elif from_file == 4 and to_file == 4:  # e7-e5
-                                score += 800000
+                        elif from_file in [2, 5]:  # c or f file
+                            score += 600000
                     
-                    # Penalize knight moves to edges
+                    # SEVERELY penalize knight moves if central pawns haven't moved
                     if from_piece.piece_type == chess.KNIGHT:
+                        # Check if central pawns have moved based on color
+                        if from_piece.color == chess.WHITE:
+                            d_pawn_moved = board.piece_at(chess.D2) is None
+                            e_pawn_moved = board.piece_at(chess.E2) is None
+                            if not d_pawn_moved and not e_pawn_moved:
+                                score -= 700000  # Huge penalty!
+                        else:  # Black
+                            d_pawn_moved = board.piece_at(chess.D7) is None
+                            e_pawn_moved = board.piece_at(chess.E7) is None
+                            if not d_pawn_moved and not e_pawn_moved:
+                                score -= 700000  # Huge penalty!
+                        
+                        # Edge penalties
                         to_file = chess.square_file(move.to_square)
                         if to_file == 0 or to_file == 7:  # Knight to a or h file
                             score -= 500000
@@ -221,20 +248,25 @@ class DrawbackSunfish:
             
             scored_moves.append((score, move))
         
-        # Sort all moves by score
-        scored_moves.sort(key=lambda x: x[0], reverse=True)
+        # Combine book moves and other scored moves - book moves will be tried first
+        all_moves = book_moves + scored_moves
         
         # Variables to track best move and score
         best_score = -MATE_UPPER
         best_move = None
         
         # Try each move
-        for _, move in scored_moves:
+        for _, move in all_moves:
             board_copy = board.copy()
             board_copy.push(move)
             
+            # Special bonus for book moves in evaluation
+            book_bonus = 0
+            if move in book_move_dict:
+                book_bonus = BOOK_MOVE_BONUS  # +50 centipawn bonus for book moves
+            
             # Recursive search
-            score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1)
+            score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1) + book_bonus
             
             # Update best score and move
             if score > best_score:
@@ -388,22 +420,10 @@ class DrawbackSunfish:
                 return fallback_move
             return None
 
+# Simplified interface function
 def best_move(board, depth, time_limit=5):
     """For use as the main AI interface"""
-    engine = DrawbackSunfish()
     try:
-        return engine.search(board.copy(), depth, time_limit)
-    except Exception as e:
-        import traceback
-        print(f"ENGINE ERROR: {str(e)}")
-        print(traceback.format_exc())
-        # Emergency fallback
-        moves = list(board.legal_moves)
-        if moves:
-            return random.choice(moves)
-        return None
-
-        # Use the engine for all other moves
         engine = DrawbackSunfish()
         return engine.search(board.copy(), depth, time_limit)
     except Exception as e:
