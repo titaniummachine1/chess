@@ -152,8 +152,15 @@ def draw_highlights(screen, board, selected_square, flipped, dimension, offset_y
     screen.blit(highlight_surf, (offset_x + draw_col * square_size, offset_y + draw_row * square_size))
 
 def draw_legal_move_indicators(screen, board, from_square, flipped, dimension, y_offset=0, x_offset=0):
-    """Draw indicators for legal moves from the selected square."""
+    """
+    Draw indicators for legal moves in chess.com style:
+    - Green transparent circles for normal moves
+    - Red transparent circles with border for captures
+    """
     square_size = BOARD_HEIGHT // dimension
+    
+    # Create a copy of the board to evaluate positions after moves
+    board_copy = board.copy()
     
     # Get all legal moves from the selected square
     for move in board.legal_moves:
@@ -166,21 +173,27 @@ def draw_legal_move_indicators(screen, board, from_square, flipped, dimension, y
             else:
                 draw_row, draw_col = 7 - to_rank, to_file
             
-            # Draw a semi-transparent circle for the legal move
+            # Calculate center position of the target square
             center_x = x_offset + draw_col * square_size + square_size // 2
             center_y = y_offset + draw_row * square_size + square_size // 2
             
-            # Create a surface for alpha blending
-            s = p.Surface((square_size, square_size), p.SRCALPHA)
+            # Determine circle color based on move type
+            is_capture = board.is_capture(move)
             
-            # Check if it's a capture
-            if board.is_capture(move):
-                # Draw a red circle for captures
-                p.draw.circle(s, (255, 0, 0, 100), (square_size//2, square_size//2), square_size//4)
-                p.draw.circle(s, (255, 0, 0, 150), (square_size//2, square_size//2), square_size//4, 3)
+            # Create a surface for chess.com style indicators
+            s = pygame.Surface((square_size, square_size), pygame.SRCALPHA)
+            
+            if is_capture:
+                # Red outline with semi-transparent fill for captures - chess.com style
+                radius = square_size // 3
+                # Draw transparent red fill
+                pygame.draw.circle(s, (255, 0, 0, 80), (square_size//2, square_size//2), radius)
+                # Draw darker red border
+                pygame.draw.circle(s, (255, 0, 0, 160), (square_size//2, square_size//2), radius, max(2, square_size//16))
             else:
-                # Draw a green circle for non-captures
-                p.draw.circle(s, (0, 255, 0, 100), (square_size//2, square_size//2), square_size//6)
-                
+                # Green semi-transparent circle for normal moves - chess.com style
+                radius = square_size // 4  # Slightly smaller than captures
+                pygame.draw.circle(s, (0, 128, 0, 100), (square_size//2, square_size//2), radius)
+            
             # Blit the surface to the screen
             screen.blit(s, (x_offset + draw_col * square_size, y_offset + draw_row * square_size))
