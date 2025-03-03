@@ -167,19 +167,15 @@ class DrawbackSunfish:
         
         # Get book moves for this position - avoid circular imports
         try:
-            from AI.book_parser import OPENING_BOOK, get_random_book_move
+            from AI.book_parser import OPENING_BOOK
             
             # Get book moves for this position
             book_move_list = OPENING_BOOK.get_book_moves(board)
             book_move_dict = {move: weight for move, weight in book_move_list}
             
-            # Get a random book move if available
-            random_book_move = None
-            if book_move_dict:
-                # Convert dictionary keys to a list first
-                book_move_keys = list(book_move_dict.keys())
-                if book_move_keys:  # Verify we actually have moves
-                    random_book_move = random.choice(book_move_keys)
+            # Use the pre-selected random book move from the search function
+            random_book_move = getattr(self, 'random_book_move', None)
+            
         except (ImportError, Exception) as e:
             print(f"Book move error: {e}")
             book_move_dict = {}
@@ -291,13 +287,13 @@ class DrawbackSunfish:
             board_copy = board.copy()
             board_copy.push(move)
             
-            # Special bonus for book moves - with 60cp for the chosen random move
+            # Special bonus for book moves - with much higher bonus for the chosen random move
             book_bonus = 0
             try:
                 if move == random_book_move:
-                    book_bonus = 60  # Higher centipawn bonus for random book move
+                    book_bonus = 150  # Much higher bonus (from 77 to 150)
                 elif move in book_move_dict:
-                    book_bonus = 35  # Normal bonus for other book moves
+                    book_bonus = 35  # Keep other book moves at standard value
             except Exception:
                 book_bonus = 0
             
@@ -342,6 +338,20 @@ class DrawbackSunfish:
             self.history.clear()
             self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
             self.eval_cache.clear()
+            
+            # Pick a random opening book move right at the beginning of search
+            # This ensures a fresh selection each time the search is called
+            self.random_book_move = None
+            try:
+                from AI.book_parser import OPENING_BOOK
+                book_moves = OPENING_BOOK.get_book_moves(board)
+                if book_moves:
+                    # Force a completely new random choice each time
+                    random.seed(time.time())  # Use current time to vary the randomness
+                    self.random_book_move = random.choice(book_moves)[0]
+                    print(f"Selected random book move to favor: {self.random_book_move}")
+            except Exception as e:
+                print(f"Book move selection error: {e}")
             
             # Simple opening book for the first move
             if len(board.move_stack) == 0:
@@ -388,7 +398,6 @@ class DrawbackSunfish:
             # Iterative deepening
             for d in range(1, depth + 1):
                 print(f"Searching at depth {d}...")
-                
                 try:
                     # Aspiration window
                     alpha = -MATE_UPPER
@@ -421,7 +430,6 @@ class DrawbackSunfish:
             if best_move is None:
                 print("Warning: No best move found! Selecting safest available move...")
                 moves = list(board.legal_moves)
-                
                 # Try to find a reasonable move
                 if moves:
                     # For the first few moves, strongly bias toward center control
@@ -443,7 +451,6 @@ class DrawbackSunfish:
                     
                     # Otherwise, just pick a random move
                     best_move = random.choice(moves)
-                
                 print(f"Selected fallback move: {best_move}")
                 
             return best_move
