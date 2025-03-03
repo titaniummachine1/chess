@@ -34,14 +34,17 @@ class DrawbackSunfish:
         self.eval_cache = {}  # Cache for position evaluations
         
     def evaluate_position(self, board, drawbacks=None):
-        """Use the dedicated evaluation function for more accurate results"""
+        """Use the dedicated evaluation function with PST adjustments if available"""
         # Check cache first
         key = board.fen()
         if key in self.eval_cache:
             return self.eval_cache[key]
         
-        # Use the improved evaluation function
-        score = eval_position(board)
+        # Check if we have book weights to apply
+        pst_weights = getattr(self, 'pst_adjustment_weights', None)
+        
+        # Use the improved evaluation function with possible PST adjustments
+        score = eval_position(board, pst_weights)
         
         # Cache the result
         self.eval_cache[key] = score
@@ -287,18 +290,9 @@ class DrawbackSunfish:
             board_copy = board.copy()
             board_copy.push(move)
             
-            # Special bonus for book moves - with much higher bonus for the chosen random move
-            book_bonus = 0
-            try:
-                if move == random_book_move:
-                    book_bonus = 150  # Much higher bonus (from 77 to 150)
-                elif move in book_move_dict:
-                    book_bonus = 35  # Keep other book moves at standard value
-            except Exception:
-                book_bonus = 0
-            
-            # Recursive search
-            score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1, True, start_time, time_limit) + book_bonus
+            # REMOVE book bonus entirely - rely solely on PST adjustments
+            # Let the PST table adjustments from book_handler influence evaluation
+            score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1, True, start_time, time_limit)
             
             # Update best score and move
             if score > best_score:
@@ -331,7 +325,7 @@ class DrawbackSunfish:
         return best_score
     
     def search(self, board, depth, time_limit=5):
-        """Improved search with better checkmate detection and opening book"""
+        """Improved search with better book move selection and PST adjustments"""
         try:
             self.nodes = 0
             self.tt.clear()
@@ -339,45 +333,36 @@ class DrawbackSunfish:
             self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
             self.eval_cache.clear()
             
-            # Pick a random opening book move right at the beginning of search
-            # This ensures a fresh selection each time the search is called
-            self.random_book_move = None
-            try:
-                from AI.book_parser import OPENING_BOOK
-                book_moves = OPENING_BOOK.get_book_moves(board)
-                if book_moves:
-                    # Force a completely new random choice each time
-                    random.seed(time.time())  # Use current time to vary the randomness
-                    self.random_book_move = random.choice(book_moves)[0]
-                    print(f"Selected random book move to favor: {self.random_book_move}")
-            except Exception as e:
-                print(f"Book move selection error: {e}")
+            # Print key position info for debugging
+            print(f"DEBUG: Searching position: {board.fen()}")
+            print(f"DEBUG: Move count: {len(board.move_stack)}, Turn: {'White' if board.turn else 'Black'}")
             
-            # Simple opening book for the first move
-            if len(board.move_stack) == 0:
-                # White's first move - use a mini opening book
-                if board.turn == chess.WHITE:
-                    # Strong preference for e4 or d4
-                    e4 = chess.Move.from_uci("e2e4")
-                    d4 = chess.Move.from_uci("d2d4")
-                    if e4 in board.legal_moves:
-                        print("Opening book: e4")
-                        return e4
-                    elif d4 in board.legal_moves:
-                        print("Opening book: d4")
-                        return d4
-            # Black's response to e4
-            elif board.turn == chess.BLACK and board.move_stack[-1].uci() == "e2e4":
-                e5 = chess.Move.from_uci("e7e5")
-                if e5 in board.legal_moves:
-                    print("Opening book: e5")
-                    return e5
-            # Black's response to d4
-            elif board.turn == chess.BLACK and board.move_stack[-1].uci() == "d2d4":
-                d5 = chess.Move.from_uci("d7d5")
-                if d5 in board.legal_moves:
-                    print("Opening book: d5")
-                    return d5
+            # Get book move suggestions with better debugging
+            try:
+                from AI.book_handler import BOOK_SELECTOR
+                
+                # Get book move and PST adjustment weights
+                suggested_book_move, pst_weights = BOOK_SELECTOR.get_weighted_book_move(board)
+                
+                if suggested_book_move:
+                    # Store the suggested move and weights to influence search
+                    self.book_move_selected = suggested_book_move
+                    self.pst_adjustment_weights = pst_weights
+                    print(f"DEBUG: Book position found, biasing evaluation toward: {suggested_book_move}")
+                    
+                    # DO NOT directly return the book move - always search
+                    # This ensures we still check tactics and don't blindly follow book
+                else:
+                    print("DEBUG: No book moves found for this position")
+                    self.book_move_selected = None
+                    self.pst_adjustment_weights = {}
+                    
+            except Exception as e:
+                import traceback
+                print(f"DEBUG: Book move selection error: {e}")
+                traceback.print_exc()
+                self.pst_adjustment_weights = {}
+                self.book_move_selected = None
             
             # Check for immediate checkmate moves first (king captures in drawback chess)
             opponent_king_square = None

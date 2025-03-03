@@ -5,12 +5,11 @@ from AI.piece_square_table import PIECE_VALUES, piece_square_tables, compute_gam
 CHECKMATE_SCORE = 10000
 DRAW_SCORE = 0
 
-def evaluate_position(board):
+def evaluate_position(board, pst_weights=None):
     """
-    Core evaluation function that correctly applies material values and piece-square tables.
-    Fixed to properly handle both White and Black perspectives.
+    Enhanced evaluation function that can apply PST adjustments from book moves
     """
-    # Check for special game endings
+    # Basic checks for special endings
     if not any(True for _ in board.legal_moves):
         if board.is_check():
             return -CHECKMATE_SCORE  # Checkmate
@@ -32,22 +31,87 @@ def evaluate_position(board):
     if not black_has_king:
         return CHECKMATE_SCORE if board.turn == chess.WHITE else -CHECKMATE_SCORE
     
-    # Calculate game phase for interpolation between midgame and endgame
+    # If we don't have book weights or they're empty, skip all the complex adjustments
+    if not pst_weights or "weights" not in pst_weights or not pst_weights["weights"]:
+        # Regular evaluation with default piece square tables
+        return evaluate_position_standard(board)
+    
+    # Calculate game phase for interpolation
     phase = compute_game_phase(board)
     
-    # Evaluate material and piece positioning
+    # Process each piece on the board with book move adjustments
     score = 0
+    book_weights = pst_weights["weights"]
+    default_weight = pst_weights.get("default", 0.25)  # Use absolute minimum for non-book moves
     
-    # Process each piece on the board
     for square, piece in board.piece_map().items():
         piece_symbol = piece.symbol().upper()
         piece_color = piece.color
         
-        # Get base material value from lookup table (midgame, endgame)
+        # Get base material value from lookup table
         material_values = PIECE_VALUES.get(piece_symbol, (0, 0))
         mg_material, eg_material = material_values
         
-        # Get piece-square table bonuses - already precomputed for both colors
+        # Get piece-square table bonuses
+        color_key = "white" if piece_color == chess.WHITE else "black"
+        mg_psqt = piece_square_tables[color_key]["mg"].get(piece_symbol, [0]*64)[square]
+        eg_psqt = piece_square_tables[color_key]["eg"].get(piece_symbol, [0]*64)[square]
+        
+        # Apply PST adjustment - ONLY for positive values from each color's perspective
+        if (piece_color == chess.WHITE and mg_psqt > 0) or (piece_color == chess.BLACK and mg_psqt < 0):
+            # Default to minimum weight for non-book moves
+            square_weight = default_weight
+            
+            # Check if square is a target of any book move
+            for book_move, weight in book_weights.items():
+                if book_move.to_square == square:
+                    square_weight = max(square_weight, weight)
+                    break
+            
+            # Apply bell curve adjustment - scaled to each side's direction
+            if piece_color == chess.WHITE:
+                mg_psqt *= square_weight  # Maximum effect for white's positive values
+                eg_psqt *= square_weight
+            else:
+                mg_psqt *= square_weight  # Maximum effect for black's negative values
+                eg_psqt *= square_weight
+        
+        # Interpolate material and position values
+        material_value = mg_material * phase + eg_material * (1 - phase)
+        position_value = mg_psqt * phase + eg_psqt * (1 - phase)
+        
+        # Add to score based on piece color
+        if piece_color == chess.WHITE:
+            score += material_value + position_value
+        else:
+            score -= material_value + position_value
+    
+    # Rest of evaluation remains the same
+    score += evaluate_pawn_structure(board, phase)
+    score += evaluate_development(board, phase)
+    score += evaluate_center_control(board)
+    score += evaluate_opening_structure(board)
+    
+    return score if board.turn == chess.WHITE else -score
+
+# Add a separate standard evaluation function with no book adjustments
+def evaluate_position_standard(board):
+    """Standard evaluation with no book move adjustments - avoids unnecessary work"""
+    # Calculate game phase for interpolation
+    phase = compute_game_phase(board)
+    
+    # Basic material and position evaluation
+    score = 0
+    
+    for square, piece in board.piece_map().items():
+        piece_symbol = piece.symbol().upper()
+        piece_color = piece.color
+        
+        # Get base material value
+        material_values = PIECE_VALUES.get(piece_symbol, (0, 0))
+        mg_material, eg_material = material_values
+        
+        # Get piece-square table bonuses
         color_key = "white" if piece_color == chess.WHITE else "black"
         mg_psqt = piece_square_tables[color_key]["mg"].get(piece_symbol, [0]*64)[square]
         eg_psqt = piece_square_tables[color_key]["eg"].get(piece_symbol, [0]*64)[square]
@@ -62,13 +126,12 @@ def evaluate_position(board):
         else:
             score -= material_value + position_value
     
-    # Additional evaluation features
+    # Additional evaluations
     score += evaluate_pawn_structure(board, phase)
     score += evaluate_development(board, phase)
     score += evaluate_center_control(board)
-    score += evaluate_opening_structure(board)  # New function to better handle opening pawn moves
+    score += evaluate_opening_structure(board)
     
-    # Return score from the perspective of the side to move
     return score if board.turn == chess.WHITE else -score
 
 def evaluate_pawn_structure(board, phase):
