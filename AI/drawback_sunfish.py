@@ -8,166 +8,42 @@ import random
 from collections import namedtuple, defaultdict
 from GameState.movegen import DrawbackBoard
 from AI.piece_square_table import PIECE_VALUES, interpolate_piece_square, compute_game_phase
-
+from AI.evaluation import evaluate_position as eval_position  # Import the new evaluation function
 # Constants for search
 MATE_LOWER = 10000
 MATE_UPPER = 20000
 QS_LIMIT = 200  # Limit for quiescence search
 EVAL_ROUGHNESS = 15
+MAX_DEPTH = 20 = 15
 MAX_DEPTH = 20
-
 # Transposition table entry
 Entry = namedtuple('Entry', 'lower upper move')
-
+Entry = namedtuple('Entry', 'lower upper move')
 class DrawbackSunfish:
     """Chess engine inspired by Sunfish but using DrawbackBoard for move generation"""
-    
+    """Chess engine inspired by Sunfish but using DrawbackBoard for move generation"""
     def __init__(self):
-        self.nodes = 0
+        self.nodes = 0:
         self.tt = {}  # Transposition table: position -> (depth, score, flag, move)
-        self.history = {}  # Move history heuristic
+        self.history = {}  # Move history heuristicon -> (depth, score, flag, move)
         self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Killer moves
+        self.eval_cache = {}  # Cache for position evaluations+ 1)]  # Killer moves
         self.eval_cache = {}  # Cache for position evaluations
-        
     def evaluate_position(self, board, drawbacks=None):
         """Improved evaluation function with better opening development strategy"""
+        """Use the dedicated evaluation function for more accurate results"""
         # Check cache first
         key = board.fen()
         if key in self.eval_cache:
             return self.eval_cache[key]
         
-        # Handle game-ending positions (king captures)
-        white_has_king = False
-        black_has_king = False
+        # Use the improved evaluation function
+        score = eval_position(board)
         
-        for square, piece in board.piece_map().items():
-            if piece.piece_type == chess.KING:
-                if piece.color == chess.WHITE:
-                    white_has_king = True
-                else:
-                    black_has_king = True
+        # Cache the result
+        self.eval_cache[key] = score
+        return score
         
-        if not white_has_king:
-            return -MATE_UPPER  # White's king is gone - loss for white
-        if not black_has_king:
-            return MATE_UPPER   # Black's king is gone - win for white
-        
-        # Calculate game phase once per position
-        phase = compute_game_phase(board)
-        
-        # Material + piece-square evaluation
-        score = 0
-        
-        # Process each piece on the board
-        for square, piece in board.piece_map().items():
-            piece_symbol = piece.symbol().upper()
-            piece_color = piece.color
-            
-            # Get material value
-            material_value = PIECE_VALUES.get(piece_symbol, (0, 0))
-            mg_value, eg_value = material_value
-            
-            # Get piece-square table bonus with optimized lookup
-            psq_score = interpolate_piece_square(piece_symbol, square, piece_color, phase)
-            
-            # Material value
-            material_score = mg_value * phase + eg_value * (1 - phase)
-            total_value = material_score + psq_score
-            
-            # Add to score based on piece color
-            if piece_color == chess.WHITE:
-                score += total_value
-            else:
-                score -= total_value
-        
-        # Additional opening/middlegame heuristics
-        if len(board.move_stack) < 20:  # Early game
-            # Development bonus (knights and bishops)
-            white_knights = list(board.pieces(chess.KNIGHT, chess.WHITE))
-            black_knights = list(board.pieces(chess.KNIGHT, chess.BLACK))
-            white_bishops = list(board.pieces(chess.BISHOP, chess.WHITE))
-            black_bishops = list(board.pieces(chess.BISHOP, chess.BLACK))
-            
-            # Knights should be developed from their original squares
-            knight_development = 0
-            for knight in white_knights:
-                if knight != chess.B1 and knight != chess.G1:
-                    knight_development += 15
-            for knight in black_knights:
-                if knight != chess.B8 and knight != chess.G8:
-                    knight_development -= 15
-            score += knight_development
-            
-            # Bishops should be developed from their original squares
-            bishop_development = 0
-            for bishop in white_bishops:
-                if bishop != chess.C1 and bishop != chess.F1:
-                    bishop_development += 15
-            for bishop in black_bishops:
-                if bishop != chess.C8 and bishop != chess.F8:
-                    bishop_development -= 15
-            score += bishop_development
-            
-            # Enhanced central pawn structure evaluation
-            white_center_control = 0
-            black_center_control = 0
-            
-            # Core center squares
-            core_center = [chess.D4, chess.E4, chess.D5, chess.E5]
-            # Extended center squares
-            extended_center = [chess.C3, chess.D3, chess.E3, chess.F3, 
-                              chess.C4, chess.F4, chess.C5, chess.F5,
-                              chess.C6, chess.D6, chess.E6, chess.F6]
-            
-            # Bonus for occupying center with pawns (specifically)
-            for square in core_center:
-                piece = board.piece_at(square)
-                if piece:
-                    if piece.color == chess.WHITE:
-                        if piece.piece_type == chess.PAWN:
-                            white_center_control += 25  # Increased bonus for pawns in center
-                        else:
-                            white_center_control += 15
-                    else:
-                        if piece.piece_type == chess.PAWN:
-                            black_center_control += 25
-                        else:
-                            black_center_control += 15
-                else:
-                    # Check if this square is pawn-attacked
-                    if board.is_attacked_by(chess.WHITE, square):
-                        white_center_control += 10  # Increased pawn attack bonus
-                    if board.is_attacked_by(chess.BLACK, square):
-                        black_center_control += 10
-
-            # Bonus for extended center control
-            for square in extended_center:
-                if board.is_attacked_by(chess.WHITE, square):
-                    white_center_control += 5
-                if board.is_attacked_by(chess.BLACK, square):
-                    black_center_control += 5
-                    
-            # Opening penalty for undeveloped pawns
-            if len(board.move_stack) < 10:
-                # Check if d2/e2 pawns are still in place
-                if board.piece_at(chess.D2) and board.piece_at(chess.D2).piece_type == chess.PAWN:
-                    score -= 20  # Penalty for not moving d-pawn
-                if board.piece_at(chess.E2) and board.piece_at(chess.E2).piece_type == chess.PAWN:
-                    score -= 20  # Penalty for not moving e-pawn
-                    
-                # Same for black
-                if board.piece_at(chess.D7) and board.piece_at(chess.D7).piece_type == chess.PAWN:
-                    score += 20  # Penalty for not moving d-pawn (black perspective)
-                if board.piece_at(chess.E7) and board.piece_at(chess.E7).piece_type == chess.PAWN:
-                    score += 20  # Penalty for not moving e-pawn (black perspective)
-            
-            score += (white_center_control - black_center_control)
-        
-        # Return score from perspective of side to move
-        final_score = score if board.turn == chess.WHITE else -score
-        self.eval_cache[key] = final_score
-        return final_score
-    
     def quiescence(self, board, alpha, beta, depth=0, max_depth=5):
         """Quiescence search to only evaluate quiet positions"""
         self.nodes += 1
@@ -232,7 +108,7 @@ class DrawbackSunfish:
         return alpha
     
     def negamax(self, board, depth, alpha, beta, ply=0, null_ok=True):
-        """Enhanced negamax with improved move ordering and checkmate detection"""
+        """Enhanced negamax with improved move ordering and randomized equal moves"""
         self.nodes += 1
         alpha_orig = alpha
         
@@ -273,9 +149,13 @@ class DrawbackSunfish:
             if null_value >= beta:
                 return beta
         
-        # Move ordering with explicit prioritization for captures and checks
+        # Get all legal moves
+        legal_moves = list(board.legal_moves)
+        
+        # Move ordering - score moves deterministically first
         scored_moves = []
-        for move in list(board.legal_moves):
+        
+        for move in legal_moves:
             score = 0
             
             # TT move gets high priority
@@ -285,20 +165,36 @@ class DrawbackSunfish:
             # King captures get highest priority
             if opponent_king_square and move.to_square == opponent_king_square:
                 score = 20000000
-                
-            # Improve move ordering for opening: prioritize central pawn moves
-            if len(board.move_stack) < 15:  # Only in opening
-                from_piece = board.piece_at(move.from_square)
-                if from_piece and from_piece.piece_type == chess.PAWN:
-                    # Central pawn advances get a bonus
-                    from_file = chess.square_file(move.from_square)
-                    if from_file in [3, 4]:  # d and e files
-                        score += 400000
-                    elif from_file in [2, 5]:  # c and f files
-                        score += 300000
             
-            # Check if this is a capture move
-            capture_value = 0
+            # In opening game, prioritize central pawn moves
+            if len(board.move_stack) < 15:  
+                from_piece = board.piece_at(move.from_square)
+                if from_piece:
+                    # Central pawn advances get a bonus
+                    if from_piece.piece_type == chess.PAWN:
+                        from_file = chess.square_file(move.from_square)
+                        to_file = chess.square_file(move.to_square)
+                        
+                        # Favor d2-d4, e2-e4 for white
+                        if board.turn == chess.WHITE:
+                            if from_file == 3 and to_file == 3:  # d2-d4
+                                score += 800000
+                            elif from_file == 4 and to_file == 4:  # e2-e4
+                                score += 800000
+                        # Similarly for black
+                        else:
+                            if from_file == 3 and to_file == 3:  # d7-d5
+                                score += 800000
+                            elif from_file == 4 and to_file == 4:  # e7-e5
+                                score += 800000
+                    
+                    # Penalize knight moves to edges
+                    if from_piece.piece_type == chess.KNIGHT:
+                        to_file = chess.square_file(move.to_square)
+                        if to_file == 0 or to_file == 7:  # Knight to a or h file
+                            score -= 500000
+            
+            # Capture scoring
             if board.is_capture(move):
                 victim = board.piece_at(move.to_square)
                 attacker = board.piece_at(move.from_square)
@@ -307,25 +203,26 @@ class DrawbackSunfish:
                     attacker_symbol = attacker.symbol().upper()
                     victim_value = PIECE_VALUES.get(victim_symbol, (0, 0))[0]
                     attacker_value = PIECE_VALUES.get(attacker_symbol, (0, 0))[0]
-                    capture_value = victim_value - (attacker_value // 10)
-                score += 1000000 + capture_value
-                
-            # Checks get priority too
+                    # MVV-LVA scoring
+                    capture_score = victim_value * 100 - attacker_value
+                    score += 1000000 + capture_score
+            
+            # Checks get priority
             if board.gives_check(move):
                 score += 500000
-                
+            
             # Killer moves
             if move == self.killers[ply][0]:
-                score = 9000
+                score += 90000
             elif move == self.killers[ply][1]:
-                score = 8000
-                
+                score += 80000
+            
             # History heuristic
             score += self.history.get((board.turn, move.from_square, move.to_square), 0)
             
             scored_moves.append((score, move))
         
-        # Sort moves by score in descending order
+        # Sort all moves by score
         scored_moves.sort(key=lambda x: x[0], reverse=True)
         
         # Variables to track best move and score
@@ -337,7 +234,7 @@ class DrawbackSunfish:
             board_copy = board.copy()
             board_copy.push(move)
             
-            # Recursive search with full window
+            # Recursive search
             score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1)
             
             # Update best score and move
@@ -358,30 +255,52 @@ class DrawbackSunfish:
                 if not board.is_capture(move):
                     key = (board.turn, move.from_square, move.to_square)
                     self.history[key] = self.history.get(key, 0) + depth * depth
-                
                 break
-        
+
         # Store in transposition table
         if best_score <= alpha_orig:
-            flag = 'upper'
             self.tt[(key, depth)] = Entry(best_score, beta, best_move)
         elif best_score >= beta:
-            flag = 'lower'
             self.tt[(key, depth)] = Entry(alpha, best_score, best_move)
         else:
-            flag = 'exact'
             self.tt[(key, depth)] = Entry(best_score, best_score, best_move)
         
         return best_score
     
     def search(self, board, depth, time_limit=5):
-        """Improved search with better checkmate detection"""
+        """Improved search with better checkmate detection and opening book"""
         try:
             self.nodes = 0
             self.tt.clear()
             self.history.clear()
             self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
             self.eval_cache.clear()
+            
+            # Simple opening book for the first move
+            if len(board.move_stack) == 0:
+                # White's first move - use a mini opening book
+                if board.turn == chess.WHITE:
+                    # Strong preference for e4 or d4
+                    e4 = chess.Move.from_uci("e2e4")
+                    d4 = chess.Move.from_uci("d2d4")
+                    if e4 in board.legal_moves:
+                        print("Opening book: e4")
+                        return e4
+                    elif d4 in board.legal_moves:
+                        print("Opening book: d4")
+                        return d4
+            # Black's response to e4
+            elif board.turn == chess.BLACK and board.move_stack[-1].uci() == "e2e4":
+                e5 = chess.Move.from_uci("e7e5")
+                if e5 in board.legal_moves:
+                    print("Opening book: e5")
+                    return e5
+            # Black's response to d4
+            elif board.turn == chess.BLACK and board.move_stack[-1].uci() == "d2d4":
+                d5 = chess.Move.from_uci("d7d5")
+                if d5 in board.legal_moves:
+                    print("Opening book: d5")
+                    return d5
             
             # Check for immediate checkmate moves first (king captures in drawback chess)
             opponent_king_square = None
@@ -435,22 +354,25 @@ class DrawbackSunfish:
                 
                 # Try to find a reasonable move
                 if moves:
-                    # First try non-pawn moves to start developing
-                    non_pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
-                                     board.piece_at(m.from_square).piece_type != chess.PAWN]
-                    if non_pawn_moves and len(board.move_stack) < 10:
-                        # Prioritize development in opening
-                        best_move = random.choice(non_pawn_moves)
-                    else:
-                        # Safe central pawn moves
-                        pawn_moves = [m for m in moves if board.piece_at(m.from_square) and 
-                                     board.piece_at(m.from_square).piece_type == chess.PAWN]
-                        central_pawn_moves = [m for m in pawn_moves if chess.square_file(m.to_square) in [2, 3, 4, 5]]
+                    # For the first few moves, strongly bias toward center control
+                    if len(board.move_stack) < 5:
+                        # Try central pawn moves first
+                        central_pawn_moves = []
+                        for m in moves:
+                            from_piece = board.piece_at(m.from_square)
+                            if from_piece and from_piece.piece_type == chess.PAWN:
+                                from_file = chess.square_file(m.from_square)
+                                to_file = chess.square_file(m.to_square)
+                                # Prioritize d and e pawns
+                                if from_file in [3, 4] and to_file in [3, 4]:
+                                    central_pawn_moves.append(m)
                         
                         if central_pawn_moves:
                             best_move = random.choice(central_pawn_moves)
-                        else:
-                            best_move = random.choice(moves)
+                            return best_move
+                    
+                    # Otherwise, just pick a random move
+                    best_move = random.choice(moves)
                 
                 print(f"Selected fallback move: {best_move}")
                 
@@ -459,7 +381,6 @@ class DrawbackSunfish:
             import traceback
             print(f"CRITICAL ERROR in search function: {str(e)}")
             print(traceback.format_exc())
-            
             # Last-resort fallback - pick any legal move
             moves = list(board.legal_moves)
             if moves:
@@ -468,21 +389,30 @@ class DrawbackSunfish:
                 return fallback_move
             return None
 
-# For use as the main AI interface
 def best_move(board, depth, time_limit=5):
+    """For use as the main AI interface"""
+    engine = DrawbackSunfish()
     try:
+        return engine.search(board.copy(), depth, time_limit)
+    except Exception as e:
+        import traceback
+        print(f"ENGINE ERROR: {str(e)}")
+        print(traceback.format_exc())
+        # Emergency fallback
+        moves = list(board.legal_moves)
+        if moves:
+            return random.choice(moves)
+        return None
+
+        # Use the engine for all other moves
         engine = DrawbackSunfish()
         return engine.search(board.copy(), depth, time_limit)
     except Exception as e:
         import traceback
         print(f"ENGINE ERROR: {str(e)}")
         print(traceback.format_exc())
-        
         # Emergency fallback
-        try:
-            moves = list(board.legal_moves)
-            if moves:
-                return random.choice(moves)
-        except:
-            pass
+        moves = list(board.legal_moves)
+        if moves:
+            return random.choice(moves)
         return None
