@@ -161,14 +161,20 @@ class DrawbackSunfish:
         book_move_list = OPENING_BOOK.get_book_moves(board)
         book_move_dict = {move: weight for move, weight in book_move_list}
         
+        # Check if book moves are legal with current drawbacks
+        legal_move_set = set(legal_moves)  # Convert to set for faster lookups
+        valid_book_moves = {move: weight for move, weight in book_move_dict.items() 
+                           if move in legal_move_set}
+        
         for move in legal_moves:
             score = 0
             
-            # Check if this move is in the opening book
-            if move in book_move_dict:
-                # Huge priority for book moves with bonus based on weight
-                weight = book_move_dict[move]
-                score = 50000000 + (weight * 10000)
+            # Check if this move is in the opening book AND legal with drawbacks
+            if move in valid_book_moves:
+                # Give book moves high priority but don't make it overwhelming
+                # This ensures book moves are tried first but not forced
+                weight = valid_book_moves[move]
+                score = 5000000 + (weight * 1000)  # Still high priority but more balanced
                 book_moves.append((score, move))
                 continue
             
@@ -260,10 +266,10 @@ class DrawbackSunfish:
             board_copy = board.copy()
             board_copy.push(move)
             
-            # Special bonus for book moves in evaluation
+            # Special bonus for book moves in evaluation - BOOK_MOVE_BONUS is already 50cp
             book_bonus = 0
             if move in book_move_dict:
-                book_bonus = BOOK_MOVE_BONUS  # +50 centipawn bonus for book moves
+                book_bonus = BOOK_MOVE_BONUS  # This is 50cp, already in the right range
             
             # Recursive search
             score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1) + book_bonus

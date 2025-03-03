@@ -7,7 +7,7 @@ import re
 import hashlib
 
 # Bonus value for book moves (in centipawns)
-BOOK_MOVE_BONUS = 50
+BOOK_MOVE_BONUS = 50  # Already set correctly at 50cp
 
 class OpeningBook:
     """
@@ -130,7 +130,7 @@ class OpeningBook:
         
         for i, move_str in enumerate(moves):
             # Skip if we're already deep in the game (only care about openings)
-            if i > 15:  # Only consider first 15 moves of each game
+            if i > 17:  # Only consider first 17 moves of each game
                 break
                 
             # Try to convert the move string to a chess.Move

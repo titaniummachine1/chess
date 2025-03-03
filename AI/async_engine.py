@@ -52,10 +52,18 @@ def run_search(board, depth, time_limit=5):
         # Always use a copy of the board for thread safety
         board_copy = board.copy()
         
-        # Check opening book first - now with improved opening book
+        # Check opening book first - but consider drawbacks 
         book_move = get_book_move(board_copy)
-        if book_move:
+        if book_move and book_move in board_copy.legal_moves:  # Make sure the book move is actually legal with drawbacks
             print(f"Opening book move found: {book_move}")
+            
+            # Check if there's a better immediate move (like king capture)
+            for move in board_copy.legal_moves:
+                target = board_copy.piece_at(move.to_square)
+                if target and target.piece_type == chess.KING:
+                    print("Found king capture (checkmate)! Prioritizing over book move.")
+                    return move
+                    
             return book_move
         
         # Check for king captures (checkmates in Drawback Chess)
@@ -140,6 +148,7 @@ def get_result():
     return current_result
 
 def is_search_complete():
+    """Check if the current search is complete"""
     return current_search is not None and current_search.done()
 
 def reset_search():
