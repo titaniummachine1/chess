@@ -29,8 +29,7 @@ def load_images(square_size):
             filename = f"images/{piece}.png"
             img = p.image.load(filename)
             # Scale to square size (with a small margin)
-            piece_size = int(square_size * 0.85)  # 85% of square size for margin
-            piece_images[piece] = p.transform.scale(img, (piece_size, piece_size))
+            piece_images[piece] = p.transform.scale(img, (square_size, square_size))
         print(f"Loaded images: {pieces}")
         
         # Store in cache
@@ -90,54 +89,38 @@ def draw_board(screen, dimension, width, height, flipped=False, offset_y=40, off
             offset_y + row * square_size + square_size//2 - label.get_height()//2
         ))
 
-def draw_pieces(screen, board, flipped, dimension, offset_y=40, offset_x=0):
-    """
-    Draw the chess pieces on the board, using consistent square size calculation.
-    Fixes: correctly position pieces on their squares.
-    """
-    # Use BOARD_HEIGHT for consistent square size across functions
+def draw_pieces(screen, board, flipped, dimension, y_offset=0, x_offset=0):
+    """Draw the chess pieces on the board with proper flipping."""
     square_size = BOARD_HEIGHT // dimension
-    pieces = load_images(square_size)
     
-    # Draw each piece
-    for row in range(dimension):
-        for col in range(dimension):
-            # Convert display coordinates to chess coordinates
-            chess_row = row if flipped else 7 - row
-            chess_col = col if not flipped else 7 - col
+    # Check if images are loaded for this square size, and load them if not
+    cache_key = f"size_{square_size}"
+    if cache_key not in PIECES_CACHE:
+        load_images(square_size)
+    
+    # Draw all pieces from the board
+    for square, piece in board.piece_map().items():
+        file, rank = chess.square_file(square), chess.square_rank(square)
+        
+        # Adjust drawing position based on flip state
+        if flipped:
+            draw_row, draw_col = rank, 7 - file
+        else:
+            draw_row, draw_col = 7 - rank, file
             
-            square = chess.square(chess_col, chess_row)
-            piece = board.piece_at(square)
-            
-            if piece:
-                # Convert piece to image key
-                color = 'w' if piece.color == chess.WHITE else 'b'
-                piece_type = None
-                
-                if piece.piece_type == chess.PAWN:
-                    piece_type = 'P'
-                elif piece.piece_type == chess.KNIGHT:
-                    piece_type = 'N'
-                elif piece.piece_type == chess.BISHOP:
-                    piece_type = 'B'
-                elif piece.piece_type == chess.ROOK:
-                    piece_type = 'R'
-                elif piece.piece_type == chess.QUEEN:
-                    piece_type = 'Q'
-                elif piece.piece_type == chess.KING:
-                    piece_type = 'K'
-                
-                image_key = color + piece_type
-                if image_key in pieces:
-                    image = pieces[image_key]
-                    
-                    # Calculate the center position of the square
-                    square_center_x = offset_x + col * square_size + square_size // 2
-                    square_center_y = offset_y + row * square_size + square_size // 2
-                    
-                    # Place the image centered on the square
-                    image_rect = image.get_rect(center=(square_center_x, square_center_y))
-                    screen.blit(image, image_rect)
+        # Get the piece image
+        color = "w" if piece.color == chess.WHITE else "b"
+        piece_type = chess.piece_symbol(piece.piece_type).upper()
+        image_key = color + piece_type
+        
+        # Calculate centered position 
+        image = PIECES_CACHE[cache_key][image_key]
+        image_width, image_height = image.get_width(), image.get_height()
+        pos_x = x_offset + draw_col * square_size + (square_size - image_width) // 2
+        pos_y = y_offset + draw_row * square_size + (square_size - image_height) // 2
+        
+        # Draw at the calculated position
+        screen.blit(image, (pos_x, pos_y))
 
 def apply_legal_move(board, move):
     """Apply a legal move to the board."""
@@ -168,42 +151,36 @@ def draw_highlights(screen, board, selected_square, flipped, dimension, offset_y
     highlight_surf.fill((255, 255, 0, 100))
     screen.blit(highlight_surf, (offset_x + draw_col * square_size, offset_y + draw_row * square_size))
 
-def draw_legal_move_indicators(screen, board, selected_square, flipped, dimension, offset_y=40, offset_x=0):
+def draw_legal_move_indicators(screen, board, from_square, flipped, dimension, y_offset=0, x_offset=0):
     """Draw indicators for legal moves from the selected square."""
-    if selected_square is None:
-        return
-        
-    # Use consistent square size
     square_size = BOARD_HEIGHT // dimension
     
+    # Get all legal moves from the selected square
     for move in board.legal_moves:
-        if move.from_square == selected_square:
-            to_row = chess.square_rank(move.to_square)
-            to_col = chess.square_file(move.to_square)
+        if move.from_square == from_square:
+            to_file, to_rank = chess.square_file(move.to_square), chess.square_rank(move.to_square)
             
-            # Convert chess coordinates to screen coordinates
+            # Adjust for flipping
             if flipped:
-                draw_row = to_row
-                draw_col = 7 - to_col
+                draw_row, draw_col = to_rank, 7 - to_file
             else:
-                draw_row = 7 - to_row
-                draw_col = to_col
+                draw_row, draw_col = 7 - to_rank, to_file
             
-            # Draw a circle for the legal move
-            circle_surface = p.Surface((square_size, square_size), p.SRCALPHA)
-            is_capture = board.piece_at(move.to_square) is not None
+            # Draw a semi-transparent circle for the legal move
+            center_x = x_offset + draw_col * square_size + square_size // 2
+            center_y = y_offset + draw_row * square_size + square_size // 2
             
-            # Special highlight for king captures
-            target = board.piece_at(move.to_square)
-            if target and target.piece_type == chess.KING:
-                # Bright red highlight for king capture
-                p.draw.circle(circle_surface, (255, 0, 0, 180), 
-                            (square_size // 2, square_size // 2), square_size // 2, 7)
-            elif is_capture:
-                p.draw.circle(circle_surface, (0, 0, 0, 120), 
-                            (square_size // 2, square_size // 2), square_size // 2, 7)
+            # Create a surface for alpha blending
+            s = p.Surface((square_size, square_size), p.SRCALPHA)
+            
+            # Check if it's a capture
+            if board.is_capture(move):
+                # Draw a red circle for captures
+                p.draw.circle(s, (255, 0, 0, 100), (square_size//2, square_size//2), square_size//4)
+                p.draw.circle(s, (255, 0, 0, 150), (square_size//2, square_size//2), square_size//4, 3)
             else:
-                p.draw.circle(circle_surface, (0, 0, 0, 120), 
-                            (square_size // 2, square_size // 2), square_size // 7)
-            
-            screen.blit(circle_surface, (offset_x + draw_col * square_size, offset_y + draw_row * square_size))
+                # Draw a green circle for non-captures
+                p.draw.circle(s, (0, 255, 0, 100), (square_size//2, square_size//2), square_size//6)
+                
+            # Blit the surface to the screen
+            screen.blit(s, (x_offset + draw_col * square_size, y_offset + draw_row * square_size))

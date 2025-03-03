@@ -18,7 +18,6 @@ def evaluate_position(board, pst_weights=None):
             evaluate_position.logged_positions = set()
             
         if position_key not in evaluate_position.logged_positions:
-            print(f"Using book weights with {len(book_weights)} book moves for position")
             evaluate_position.logged_positions.add(position_key)
         
         # Rest of existing evaluation with weights

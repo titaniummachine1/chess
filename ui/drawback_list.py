@@ -141,7 +141,10 @@ class DrawbackList:
         for btn in self.buttons:
             if btn.is_clicked(pos, self.scroll_y):
                 if board:
-                    board.set_drawback(self.color, btn.id)
+                    if self.color == chess.WHITE:
+                        board.set_white_drawback(btn.id)  # Use proper method
+                    else:
+                        board.set_black_drawback(btn.id)  # Use proper method
                 self.selected_drawback = btn.id
                 
                 # Update button active states

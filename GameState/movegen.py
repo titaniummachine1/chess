@@ -147,40 +147,35 @@ class DrawbackBoard(chess.Board):
         drawback = DRAWBACKS.get(drawback_name, {})
         if not drawback or not drawback.get("supported", False):
             return True
+        
+        # Debug output for true gentleman checks
+        if drawback_name == "true_gentleman" and self.is_capture(move):
+            target = self.piece_at(move.to_square)
+            if target and target.piece_type == chess.QUEEN:
+                print(f"DEBUG: True Gentleman should block capture of queen at {chess.square_name(move.to_square)}")
             
-        check_function_name = drawback.get("check_move")
-        if not check_function_name:
-            return True
-            
-        # Import the drawback module dynamically
+        # Try to get the check function directly from imported module  
         try:
-            module_name = f"GameState.drawbacks.{drawback_name}"
-            module = __import__(module_name, fromlist=[''])
+            from GameState.drawback_manager import get_drawback_function
+            check_function = get_drawback_function(drawback_name)
             
-            # Get the check function
-            check_function = getattr(module, check_function_name)
-            if not check_function:
-                print(f"Warning: Function {check_function_name} not found in {module_name}")
-                return True
+            if check_function:
+                # Get parameters if available
+                params = drawback.get("params", {})
                 
-            # Get parameters if available
-            params = drawback.get("params", {})
-            
-            # Call the check function with parameters
-            if params:
-                return check_function(self, move, color, **params)
-            else:
-                return check_function(self, move, color)
-                
-        except ImportError:
-            print(f"Warning: Failed to import drawback module {drawback_name}")
-            return True
-        except AttributeError as e:
-            print(f"Warning: Failed to get check function for {drawback_name}: {e}")
-            return True
+                # Call the check function with parameters
+                if params:
+                    result = check_function(self, move, color, **params)
+                else:
+                    result = check_function(self, move, color)
+                    
+                return result
         except Exception as e:
             print(f"Error checking drawback {drawback_name}: {e}")
-            return True
+            import traceback
+            traceback.print_exc()
+                
+        return True  # Default to allowing move if there's an error
 
     def copy(self):
         new_board = DrawbackBoard(fen=self.fen())

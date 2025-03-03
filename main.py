@@ -10,8 +10,8 @@ from GameState.drawback_manager import DRAWBACKS
 # Game Settings
 FPS = 60
 AI_DEPTH = 4
-WHITE_AI = True
-BLACK_AI = True
+WHITE_AI = False
+BLACK_AI = False
 
 AVAILABLE_DRAWBACKS = [
     "no_knight_moves",
@@ -44,24 +44,15 @@ SQ_SIZE = BOARD_HEIGHT // DIMENSION
 
 utils.BOARD_HEIGHT = BOARD_HEIGHT
 
-# UI panel (optional)
+# UI panel setup
 try:
-    # Import pygame_gui first to check if it's available
-    import pygame_gui
-    print(f"Found pygame_gui version: {pygame_gui.__version__ if hasattr(pygame_gui, '__version__') else 'unknown'}")
-    
-    # Then try to import our TinkerPanel
-    try:
-        from ui.tinker_panel import TinkerPanel
-        HAS_TINKER_PANEL = True
-        print("Tinker Panel UI loaded successfully")
-    except Exception as panel_error:
-        print(f"Warning: Tinker Panel failed to load: {panel_error}")
-        import traceback
-        traceback.print_exc()
-        HAS_TINKER_PANEL = False
-except ImportError as e:
-    print(f"Warning: pygame_gui not found. Tinker Panel disabled. Error: {e}")
+    from ui.tinker_panel import TinkerPanel
+    HAS_TINKER_PANEL = True
+    print("Tinker Panel UI loaded successfully")
+except Exception as panel_error:
+    print(f"Warning: Tinker Panel failed to load: {panel_error}")
+    import traceback
+    traceback.print_exc()
     HAS_TINKER_PANEL = False
 
 # Import AI async functions
@@ -89,12 +80,22 @@ def display_drawbacks(screen, board, flipped):
     font = p.font.SysFont(None, 22)
     white_drawback = board.get_active_drawback(chess.WHITE) or "None"
     black_drawback = board.get_active_drawback(chess.BLACK) or "None"
-    white_text = font.render(f"White: {white_drawback.replace('_',' ').title()}", True, p.Color("white"), p.Color("black"))
-    black_text = font.render(f"Black: {black_drawback.replace('_',' ').title()}", True, p.Color("black"), p.Color("white"))
+    
+    # Format the drawback names for display
+    white_display = white_drawback.replace('_', ' ').title()
+    black_display = black_drawback.replace('_', ' ').title()
+    
+    # Create the text surfaces
+    white_text = font.render(f"White: {white_display}", True, p.Color("white"), p.Color("black"))
+    black_text = font.render(f"Black: {black_display}", True, p.Color("black"), p.Color("white"))
+    
+    # Position based on flipped state - this ensures they're always on the correct side
     if flipped:
-        screen.blit(black_text, (10, 10))
+        # Flipped: White on bottom of screen, black on top
         screen.blit(white_text, (10, HEIGHT - 30))
+        screen.blit(black_text, (10, 10))
     else:
+        # Normal: White on top of screen, black on bottom
         screen.blit(white_text, (10, 10))
         screen.blit(black_text, (10, HEIGHT - 30))
 
@@ -123,6 +124,13 @@ def draw_tinker_button(screen):
 
 def open_tinker_panel(board):
     global WHITE_AI, BLACK_AI, flipped, AI_DEPTH
+    
+    # Stop AI search while in tinker panel to prevent lag
+    old_search_in_progress = False
+    if 'search_in_progress' in globals() and search_in_progress:
+        old_search_in_progress = search_in_progress
+        reset_search()  # Stop any ongoing AI search
+    
     if HAS_TINKER_PANEL:
         try:
             ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH}
@@ -134,9 +142,17 @@ def open_tinker_panel(board):
                 WHITE_AI = updated_ai_settings["WHITE_AI"]
                 BLACK_AI = updated_ai_settings["BLACK_AI"]
                 AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
+                
+                # Update drawbacks on the board
+                board.set_white_drawback(white_drawback)
+                board.set_black_drawback(black_drawback)
+                
+                # Only flip if the option changed
+                old_flipped = flipped
                 if options.get("FLIP_BOARD", False):
-                    flipped = not flipped
-                    print("Board flipped from Tinker Panel")
+                    flipped = not old_flipped
+                    print(f"Board flipped: {old_flipped} -> {flipped}")
+                
                 print("Tinker Panel settings applied successfully")
             else:
                 print("Tinker Panel closed without changes")
@@ -144,6 +160,10 @@ def open_tinker_panel(board):
             # Restore main window
             p.display.set_mode((WIDTH, HEIGHT))
             p.display.set_caption("Drawback Chess")
+            
+            # Clear all events that built up while panel was open
+            p.event.clear()
+            
         except Exception as e:
             print(f"Error in Tinker Panel: {e}")
             import traceback
@@ -153,6 +173,9 @@ def open_tinker_panel(board):
             p.display.set_caption("Drawback Chess")
     else:
         print("Tinker Panel not available - see above errors for details.")
+        
+    # Ensure pygame is properly initialized after returning
+    p.display.update()
 
 def display_ai_status(screen, board):
     if not HAS_AI:
@@ -231,6 +254,10 @@ async def async_main():
     screen = p.display.set_mode((WIDTH, HEIGHT))
     clock = p.time.Clock()
     p.display.set_caption("Drawback Chess")
+    
+    # Load images for pieces at the beginning
+    square_size = BOARD_HEIGHT // DIMENSION
+    IMAGES = load_images(square_size)
     
     ai_move_cooldown = 0
     board = DrawbackBoard()

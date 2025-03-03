@@ -20,7 +20,7 @@ def load_drawbacks():
 
     # Ensure the parent directory is in sys.path to import 'drawbacks' package
     parent_dir = os.path.dirname(current_dir)
-    if parent_dir not in sys.path:
+    if (parent_dir not in sys.path):
         sys.path.append(parent_dir)
 
     # Load each Python file in the 'drawbacks' directory (except __init__.py)
@@ -145,6 +145,16 @@ BUILTIN_DRAWBACKS = {
         "description": "You lose if you ever start your turn while there's an open file",
         "check_move": "check_closed_book", 
         "supported": True
+    },
+    "true_gentleman": {
+        "description": "You can't capture queens",
+        "check_move": "check_true_gentleman",
+        "supported": True
+    },
+    "pack_mentality": {
+        "description": "Your pieces must move to squares adjacent to another one of your pieces",
+        "check_move": "check_pack_mentality",
+        "supported": True
     }
 }
 
@@ -181,6 +191,32 @@ def update_drawback_params(drawback_name, new_params):
         DRAWBACKS[drawback_name]["params"] = current_params
         return True
     return False
+
+def get_drawback_function(drawback_name):
+    """Get the check function for a drawback directly"""
+    if not drawback_name or drawback_name not in DRAWBACKS:
+        return None
+        
+    drawback = DRAWBACKS[drawback_name]
+    if not drawback.get("supported", False):
+        return None
+        
+    # Get function name
+    func_name = drawback.get("check_move")
+    if not func_name:
+        return None
+        
+    # Try to import the module
+    try:
+        module_name = f"GameState.drawbacks.{drawback_name}"
+        module = __import__(module_name, fromlist=[''])
+        
+        # Get function
+        check_function = getattr(module, func_name)
+        return check_function
+    except (ImportError, AttributeError) as e:
+        print(f"Error getting drawback function '{func_name}' from {drawback_name}: {e}")
+        return None
 
 # Attempt to load drawbacks when this module is imported
 load_drawbacks()
