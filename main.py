@@ -7,6 +7,18 @@ from utils import load_images, draw_board, draw_pieces, draw_legal_move_indicato
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
 
+# Game Settings
+WIDTH = 800
+HEIGHT = 760
+BOARD_HEIGHT = 640
+BOARD_Y_OFFSET = 80
+BOARD_X_OFFSET = 80
+DIMENSION = 8
+SQ_SIZE = BOARD_HEIGHT // DIMENSION
+FPS = 60
+AI_DEPTH = 4
+
+
 import utils
 BOARD_HEIGHT = 640  # Actual board height
 utils.BOARD_HEIGHT = BOARD_HEIGHT
@@ -26,17 +38,6 @@ try:
 except ImportError:
     print("Warning: AI module not available.")
     HAS_AI = False
-
-# Game Settings
-WIDTH = 800
-HEIGHT = 760
-BOARD_HEIGHT = 640
-BOARD_Y_OFFSET = 80
-BOARD_X_OFFSET = 80
-DIMENSION = 8
-SQ_SIZE = BOARD_HEIGHT // DIMENSION
-FPS = 60
-AI_DEPTH = 4
 
 # Global state
 game_over = False
