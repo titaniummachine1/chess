@@ -7,7 +7,7 @@ import re
 import hashlib
 
 # Bonus value for book moves (in centipawns)
-BOOK_MOVE_BONUS = 50  # Already set correctly at 50cp
+BOOK_MOVE_BONUS = 35  # Slightly lower bonus to prevent book moves from dominating
 
 class OpeningBook:
     """

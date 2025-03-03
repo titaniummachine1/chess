@@ -9,7 +9,7 @@ import random
 from collections import namedtuple
 from GameState.movegen import DrawbackBoard
 from AI.evaluation import evaluate_position as eval_position
-from AI.piece_square_table import PIECE_VALUES  # Add this import to fix undefined PIECE_VALUES
+from AI.piece_square_table import PIECE_VALUES
 from AI.book_parser import is_book_position, BOOK_MOVE_BONUS
 
 # Constants for search
@@ -107,8 +107,13 @@ class DrawbackSunfish:
                 
         return alpha
     
-    def negamax(self, board, depth, alpha, beta, ply=0, null_ok=True):
-        """Enhanced negamax with improved move ordering and book move prioritization"""
+    def negamax(self, board, depth, alpha, beta, ply=0, null_ok=True, start_time=None, time_limit=None):
+        """Enhanced negamax with improved move ordering, book move prioritization and proper time checking"""
+        # Check time limit more frequently
+        if start_time and time_limit and time.time() - start_time > time_limit:
+            # Return a flag indicating time's up
+            raise TimeoutError("Search time limit reached")
+            
         self.nodes += 1
         alpha_orig = alpha
         
@@ -145,20 +150,23 @@ class DrawbackSunfish:
             # Try a null move to see if we can get a beta cutoff
             board_copy = board.copy()
             board_copy.push(chess.Move.null())
-            null_value = -self.negamax(board_copy, depth - 3, -beta, -beta + 1, ply + 1, False)
+            null_value = -self.negamax(board_copy, depth - 3, -beta, -beta + 1, ply + 1, False, start_time, time_limit)
             if null_value >= beta:
                 return beta
         
         # Get all legal moves
         legal_moves = list(board.legal_moves)
+        # First shuffle moves randomly for variety
+        random.shuffle(legal_moves)
         
-        # Move ordering - score moves deterministically first
+        # Move ordering - score moves after shuffling
         scored_moves = []
-        book_moves = []
         from AI.book_parser import OPENING_BOOK
         
         # Get book moves for this position
         book_move_list = OPENING_BOOK.get_book_moves(board)
+        # Lower move ordering priority for book moves - still high but not absolute
+        book_move_bonus = 1000000  # Reduced priority from previous value
         book_move_dict = {move: weight for move, weight in book_move_list}
         
         # Check if book moves are legal with current drawbacks
@@ -169,15 +177,13 @@ class DrawbackSunfish:
         for move in legal_moves:
             score = 0
             
-            # Check if this move is in the opening book AND legal with drawbacks
+            # Book moves get good but not overwhelming priority
             if move in valid_book_moves:
                 # Give book moves high priority but don't make it overwhelming
                 # This ensures book moves are tried first but not forced
                 weight = valid_book_moves[move]
                 score = 5000000 + (weight * 1000)  # Still high priority but more balanced
-                book_moves.append((score, move))
-                continue
-            
+                
             # TT move gets high priority
             if tt_entry and move == tt_entry.move:
                 score = 10000000
@@ -254,25 +260,29 @@ class DrawbackSunfish:
             
             scored_moves.append((score, move))
         
-        # Combine book moves and other scored moves - book moves will be tried first
-        all_moves = book_moves + scored_moves
+        # Sort all moves by score
+        scored_moves.sort(key=lambda x: x[0], reverse=True)
         
         # Variables to track best move and score
         best_score = -MATE_UPPER
         best_move = None
         
         # Try each move
-        for _, move in all_moves:
+        for _, move in scored_moves:
+            # Check time limit during each move evaluation
+            if start_time and time_limit and time.time() - start_time > time_limit:
+                raise TimeoutError("Search time limit reached")
+                
             board_copy = board.copy()
             board_copy.push(move)
             
-            # Special bonus for book moves in evaluation - BOOK_MOVE_BONUS is already 50cp
+            # Special bonus for book moves in evaluation
             book_bonus = 0
             if move in book_move_dict:
-                book_bonus = BOOK_MOVE_BONUS  # This is 50cp, already in the right range
+                book_bonus = BOOK_MOVE_BONUS  # +35 centipawn bonus for book moves
             
             # Recursive search
-            score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1) + book_bonus
+            score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1, True, start_time, time_limit) + book_bonus
             
             # Update best score and move
             if score > best_score:
@@ -363,7 +373,7 @@ class DrawbackSunfish:
                     # Aspiration window
                     alpha = -MATE_UPPER
                     beta = MATE_UPPER
-                    score = self.negamax(board, d, alpha, beta)
+                    score = self.negamax(board, d, alpha, beta, start_time=start_time, time_limit=time_limit)
                     
                     # Get the best move from the TT
                     key = (board.fen(), d)
@@ -372,6 +382,9 @@ class DrawbackSunfish:
                         
                     # Print info
                     print(f"Depth: {d}, Score: {score}, Nodes: {self.nodes}, Best move: {best_move}")
+                except TimeoutError:
+                    print(f"Time limit reached at depth {d}")
+                    break
                 except Exception as e:
                     import traceback
                     print(f"Error at depth {d}: {str(e)}")

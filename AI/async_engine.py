@@ -45,34 +45,23 @@ def get_opening_book_move(board):
     return None
 
 def run_search(board, depth, time_limit=5):
-    """Run the engine search in a separate thread with opening book integration"""
+    """Run the engine search in a separate thread with integrated book knowledge"""
     try:
         start_time = time.time()
         
         # Always use a copy of the board for thread safety
         board_copy = board.copy()
         
-        # Check opening book first - but consider drawbacks 
-        book_move = get_book_move(board_copy)
-        if book_move and book_move in board_copy.legal_moves:  # Make sure the book move is actually legal with drawbacks
-            print(f"Opening book move found: {book_move}")
-            
-            # Check if there's a better immediate move (like king capture)
-            for move in board_copy.legal_moves:
-                target = board_copy.piece_at(move.to_square)
-                if target and target.piece_type == chess.KING:
-                    print("Found king capture (checkmate)! Prioritizing over book move.")
-                    return move
-                    
-            return book_move
-        
-        # Check for king captures (checkmates in Drawback Chess)
+        # Check for king captures (checkmates in Drawback Chess) - highest priority
         for move in board_copy.legal_moves:
             target = board_copy.piece_at(move.to_square)
             if target and target.piece_type == chess.KING:
                 print("Found king capture (checkmate)!")
                 return move
-                
+        
+        # Don't immediately return book moves - let the engine evaluate them with a bonus
+        # instead of checking opening book first
+        
         # Call the core engine search with the time limit
         print(f"Starting regular search at depth {depth}, time limit {time_limit}s")
         move = engine_best_move(board_copy, depth, time_limit)
