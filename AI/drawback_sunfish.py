@@ -10,12 +10,15 @@ from collections import namedtuple
 from GameState.movegen import DrawbackBoard
 from AI.evaluation import evaluate_position as eval_position
 from AI.piece_square_table import PIECE_VALUES
-from AI.book_parser import is_book_position, BOOK_MOVE_BONUS
+# Safe imports to avoid circular references
+try:
+    from AI.book_parser import is_book_position
+except ImportError:
+    # Define a fallback function if module not available
+    def is_book_position(board):
+        return False
 
-# Constants for search
-MATE_LOWER = 10000
-MATE_UPPER = 20000
-MAX_DEPTH = 20
+from AI.ai_utils import MATE_LOWER, MATE_UPPER, MAX_DEPTH, BOOK_MOVE_BONUS, BOOK_MOVE_BONUS_REGULAR
 
 # Transposition table entry
 Entry = namedtuple('Entry', 'lower upper move')
@@ -108,7 +111,7 @@ class DrawbackSunfish:
         return alpha
     
     def negamax(self, board, depth, alpha, beta, ply=0, null_ok=True, start_time=None, time_limit=None):
-        """Enhanced negamax with improved move ordering, book move prioritization and proper time checking"""
+        """Enhanced negamax with improved move ordering and proper time checking"""
         # Check time limit more frequently
         if start_time and time_limit and time.time() - start_time > time_limit:
             # Return a flag indicating time's up
@@ -161,29 +164,41 @@ class DrawbackSunfish:
         
         # Move ordering - score moves after shuffling
         scored_moves = []
-        from AI.book_parser import OPENING_BOOK
         
-        # Get book moves for this position
-        book_move_list = OPENING_BOOK.get_book_moves(board)
-        # Lower move ordering priority for book moves - still high but not absolute
-        book_move_bonus = 1000000  # Reduced priority from previous value
-        book_move_dict = {move: weight for move, weight in book_move_list}
+        # Get book moves for this position - avoid circular imports
+        try:
+            from AI.book_parser import OPENING_BOOK, get_random_book_move
+            
+            # Get book moves for this position
+            book_move_list = OPENING_BOOK.get_book_moves(board)
+            book_move_dict = {move: weight for move, weight in book_move_list}
+            
+            # Get a random book move if available
+            random_book_move = None
+            if book_move_dict:
+                # Convert dictionary keys to a list first
+                book_move_keys = list(book_move_dict.keys())
+                if book_move_keys:  # Verify we actually have moves
+                    random_book_move = random.choice(book_move_keys)
+        except (ImportError, Exception) as e:
+            print(f"Book move error: {e}")
+            book_move_dict = {}
+            random_book_move = None
         
         # Check if book moves are legal with current drawbacks
         legal_move_set = set(legal_moves)  # Convert to set for faster lookups
-        valid_book_moves = {move: weight for move, weight in book_move_dict.items() 
-                           if move in legal_move_set}
         
         for move in legal_moves:
             score = 0
             
-            # Book moves get good but not overwhelming priority
-            if move in valid_book_moves:
-                # Give book moves high priority but don't make it overwhelming
-                # This ensures book moves are tried first but not forced
-                weight = valid_book_moves[move]
-                score = 5000000 + (weight * 1000)  # Still high priority but more balanced
-                
+            # Random selected book move gets highest priority
+            if move == random_book_move:
+                score = 30000000  # Much higher priority than other book moves
+            # Other book moves still get good priority
+            elif move in book_move_dict:
+                weight = book_move_dict[move]
+                score = 5000000 + (weight * 1000)
+            
             # TT move gets high priority
             if tt_entry and move == tt_entry.move:
                 score = 10000000
@@ -276,10 +291,15 @@ class DrawbackSunfish:
             board_copy = board.copy()
             board_copy.push(move)
             
-            # Special bonus for book moves in evaluation
+            # Special bonus for book moves - with 60cp for the chosen random move
             book_bonus = 0
-            if move in book_move_dict:
-                book_bonus = BOOK_MOVE_BONUS  # +35 centipawn bonus for book moves
+            try:
+                if move == random_book_move:
+                    book_bonus = 60  # Higher centipawn bonus for random book move
+                elif move in book_move_dict:
+                    book_bonus = 35  # Normal bonus for other book moves
+            except Exception:
+                book_bonus = 0
             
             # Recursive search
             score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1, True, start_time, time_limit) + book_bonus

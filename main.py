@@ -8,6 +8,20 @@ from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
 
 # Game Settings
+FPS = 60
+AI_DEPTH = 4
+WHITE_AI = True
+BLACK_AI = True
+
+AVAILABLE_DRAWBACKS = [
+    "no_knight_moves",
+    "no_bishop_captures",
+    "no_knight_captures",
+    "punching_down"
+]
+
+import utils
+BOARD_HEIGHT = 640  # Actual board height
 WIDTH = 800
 HEIGHT = 760
 BOARD_HEIGHT = 640
@@ -15,12 +29,7 @@ BOARD_Y_OFFSET = 80
 BOARD_X_OFFSET = 80
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
-FPS = 60
-AI_DEPTH = 4
 
-
-import utils
-BOARD_HEIGHT = 640  # Actual board height
 utils.BOARD_HEIGHT = BOARD_HEIGHT
 
 # UI panel (optional)
@@ -33,35 +42,24 @@ except ImportError:
 
 # Import AI async functions
 try:
+    print("Attempting to import AI module...")
     from AI.async_engine import start_search, get_progress, get_result, is_search_complete, reset_search
     HAS_AI = True
-except ImportError:
-    print("Warning: AI module not available.")
+    print("AI module imported successfully")
+except Exception as e:
+    print(f"Warning: AI module not available. Error: {e}")
+    import traceback
+    traceback.print_exc()
     HAS_AI = False
 
 # Global state
 game_over = False
 winner_color = None
 flipped = False
-WHITE_AI = False
-BLACK_AI = True
+
 ai_move_cooldown = 0
 tinker_button_rect = p.Rect(WIDTH - 120, 10, 100, 35)
 search_in_progress = False
-AVAILABLE_DRAWBACKS = [
-    "no_knight_moves",
-    "no_bishop_captures",
-    "no_knight_captures",
-    "punching_down"
-]
-
-def assign_random_drawbacks(board):
-    white_drawback = random.choice(AVAILABLE_DRAWBACKS)
-    black_drawback = random.choice(AVAILABLE_DRAWBACKS)
-    board.set_drawback(chess.WHITE, white_drawback)
-    board.set_drawback(chess.BLACK, black_drawback)
-    print(f"White drawback: {white_drawback}")
-    print(f"Black drawback: {black_drawback}")
 
 def display_drawbacks(screen, board, flipped):
     font = p.font.SysFont(None, 22)
@@ -198,7 +196,6 @@ async def async_main():
     
     ai_move_cooldown = 0
     board = DrawbackBoard()
-    assign_random_drawbacks(board)
     board.reset()
     running = True
     flipped = False
@@ -259,7 +256,6 @@ async def async_main():
             elif event.type == p.KEYDOWN:
                 if event.key == p.K_r:
                     board = DrawbackBoard()
-                    assign_random_drawbacks(board)
                     board.reset()
                     selected_square = None
                     game_over = False

@@ -7,8 +7,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 import random
 import chess
-from AI.drawback_sunfish import best_move as engine_best_move
-from AI.book_parser import get_book_move, is_book_position, BOOK_MOVE_BONUS
+from AI.ai_utils import get_king_capture_move
 
 # Global state for async search
 current_search = None
@@ -16,74 +15,58 @@ current_progress = "Idle"
 current_result = None
 search_executor = ThreadPoolExecutor(max_workers=1)
 
-# Simple opening book for standard openings
-def get_opening_book_move(board):
-    """Get standard opening moves for common starting positions"""
-    if len(board.move_stack) == 0:
-        # First moves as white
-        if board.turn == chess.WHITE:
-            for move_uci in ["e2e4", "d2d4"]:
-                try:
-                    move = chess.Move.from_uci(move_uci)
-                    if move in board.legal_moves:
-                        return move
-                except ValueError:
-                    pass
-    elif len(board.move_stack) == 1:
-        # First moves as black
-        if board.turn == chess.BLACK:
-            last_move = board.move_stack[-1]
-            if last_move.uci() == "e2e4":
-                e5 = chess.Move.from_uci("e7e5")
-                if e5 in board.legal_moves:
-                    return e5
-            elif last_move.uci() == "d2d4":
-                d5 = chess.Move.from_uci("d7d5")
-                if d5 in board.legal_moves:
-                    return d5
-    
-    return None
-
+# Update the run_search function to give the engine more time
 def run_search(board, depth, time_limit=5):
-    """Run the engine search in a separate thread with integrated book knowledge"""
+    """Run the engine search in a separate thread"""
     try:
         start_time = time.time()
+        print(f"Search started at depth {depth}, time limit {time_limit}s")
         
         # Always use a copy of the board for thread safety
         board_copy = board.copy()
         
-        # Check for king captures (checkmates in Drawback Chess) - highest priority
-        for move in board_copy.legal_moves:
-            target = board_copy.piece_at(move.to_square)
-            if target and target.piece_type == chess.KING:
-                print("Found king capture (checkmate)!")
-                return move
+        # First check for king captures - this is done directly here to avoid imports
+        king_capture = get_king_capture_move(board_copy)
+        if king_capture:
+            print("Found king capture (checkmate)!")
+            return king_capture
         
-        # Don't immediately return book moves - let the engine evaluate them with a bonus
-        # instead of checking opening book first
-        
-        # Call the core engine search with the time limit
-        print(f"Starting regular search at depth {depth}, time limit {time_limit}s")
-        move = engine_best_move(board_copy, depth, time_limit)
-        
-        elapsed = time.time() - start_time
-        print(f"Search completed in {elapsed:.2f}s, found move: {move}")
-        
-        return move
-    except Exception as e:
-        print(f"Engine search error: {e}")
-        print(traceback.format_exc())
-        
-        # Emergency fallback
+        # Import engine only when needed to avoid circular imports
         try:
-            legal_moves = list(board.legal_moves)
-            if legal_moves:
-                move = random.choice(legal_moves)
-                print(f"Using emergency fallback move: {move}")
-                return move
-        except:
-            pass
-        return None
+            # Force a small delay to prevent instant moves
+            min_think_time = 1.0  # At least 1 second of "thinking"
+            from AI.drawback_sunfish import best_move as engine_best_move
+            
+            # Call the actual engine search with the time limit
+            move = engine_best_move(board_copy, depth, time_limit)
+            
+            elapsed = time.time() - start_time
+            # Ensure minimum thinking time for visual feedback
+            if elapsed < min_think_time:
+                time.sleep(min_think_time - elapsed)
+                elapsed = time.time() - start_time
+                
+            print(f"Search completed in {elapsed:.2f}s, found move: {move}")
+            
+            return move
+        except Exception as engine_error:
+            print(f"Engine error: {engine_error}")
+            traceback.print_exc()
+            
+    except Exception as e:
+        print(f"ENGINE SEARCH ERROR: {e}")
+        traceback.print_exc()
+        
+    # Emergency fallback - pick a random legal move
+    try:
+        legal_moves = list(board.legal_moves)
+        if legal_moves:
+            move = random.choice(legal_moves)
+            print(f"EMERGENCY: Using random fallback move: {move}")
+            return move
+    except Exception as fallback_error:
+        print(f"Critical fallback error: {fallback_error}")
+    return None
 
 async def async_search(board, depth, time_limit=5):
     """Run the chess engine search asynchronously"""
@@ -105,7 +88,7 @@ async def async_search(board, depth, time_limit=5):
         else:
             current_progress = "No move found"
     except Exception as e:
-        print(f"Search error: {str(e)}")
+        print(f"ASYNC SEARCH ERROR: {str(e)}")
         current_progress = f"Search error: {str(e)}"
         current_result = None
 
@@ -128,20 +111,17 @@ def start_search(board, depth, time_limit=5):
     current_progress = f"Thinking at depth {depth}..."
     print(f"[DEBUG] Search task started successfully")
 
+# Other simple functions remain the same
 def get_progress():
-    """Get the current search progress description"""
     return current_progress
 
 def get_result():
-    """Get the completed search result"""
     return current_result
 
 def is_search_complete():
-    """Check if the current search is complete"""
     return current_search is not None and current_search.done()
 
 def reset_search():
-    """Reset the search state"""
     global current_search, current_progress, current_result
     current_search = None
     current_progress = "Idle"
