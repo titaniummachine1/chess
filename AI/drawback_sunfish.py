@@ -14,7 +14,6 @@ MATE_LOWER = 10000
 MATE_UPPER = 20000
 QS_LIMIT = 200  # Limit for quiescence search
 EVAL_ROUGHNESS = 15
-MAX_DEPTH = 20 = 15
 MAX_DEPTH = 20
 # Transposition table entry
 Entry = namedtuple('Entry', 'lower upper move')
@@ -23,7 +22,7 @@ class DrawbackSunfish:
     """Chess engine inspired by Sunfish but using DrawbackBoard for move generation"""
     """Chess engine inspired by Sunfish but using DrawbackBoard for move generation"""
     def __init__(self):
-        self.nodes = 0:
+        self.nodes = 0
         self.tt = {}  # Transposition table: position -> (depth, score, flag, move)
         self.history = {}  # Move history heuristicon -> (depth, score, flag, move)
         self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Killer moves
