@@ -17,7 +17,19 @@ AVAILABLE_DRAWBACKS = [
     "no_knight_moves",
     "no_bishop_captures",
     "no_knight_captures",
-    "punching_down"
+    "punching_down",
+    "professional_courtesy",
+    "just_passing_through", 
+    "forward_march",
+    "get_down_mr_president",
+    "vegan",
+    "chivalry",
+    "blinded_by_the_sun",
+    "leaps_and_bounds",
+    "friendly_fire",
+    "covering_fire",
+    "atomic_bomb",
+    "closed_book"
 ]
 
 import utils
@@ -34,10 +46,22 @@ utils.BOARD_HEIGHT = BOARD_HEIGHT
 
 # UI panel (optional)
 try:
-    from ui.tinker_panel import TinkerPanel
-    HAS_TINKER_PANEL = True
-except ImportError:
-    print("Warning: pygame_gui not found. Tinker Panel disabled.")
+    # Import pygame_gui first to check if it's available
+    import pygame_gui
+    print(f"Found pygame_gui version: {pygame_gui.__version__ if hasattr(pygame_gui, '__version__') else 'unknown'}")
+    
+    # Then try to import our TinkerPanel
+    try:
+        from ui.tinker_panel import TinkerPanel
+        HAS_TINKER_PANEL = True
+        print("Tinker Panel UI loaded successfully")
+    except Exception as panel_error:
+        print(f"Warning: Tinker Panel failed to load: {panel_error}")
+        import traceback
+        traceback.print_exc()
+        HAS_TINKER_PANEL = False
+except ImportError as e:
+    print(f"Warning: pygame_gui not found. Tinker Panel disabled. Error: {e}")
     HAS_TINKER_PANEL = False
 
 # Import AI async functions
@@ -100,21 +124,35 @@ def draw_tinker_button(screen):
 def open_tinker_panel(board):
     global WHITE_AI, BLACK_AI, flipped, AI_DEPTH
     if HAS_TINKER_PANEL:
-        ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH}
-        tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
-        result = tinker_panel.run()
-        if result:
-            white_drawback, black_drawback, updated_ai_settings, options = result
-            WHITE_AI = updated_ai_settings["WHITE_AI"]
-            BLACK_AI = updated_ai_settings["BLACK_AI"]
-            AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
-            if options.get("FLIP_BOARD", False):
-                flipped = not flipped
-                print("Board flipped from Tinker Panel")
-        p.display.set_mode((WIDTH, HEIGHT))
-        p.display.set_caption("Drawback Chess")
+        try:
+            ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH}
+            print("Opening Tinker Panel...")
+            tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
+            result = tinker_panel.run()
+            if result:
+                white_drawback, black_drawback, updated_ai_settings, options = result
+                WHITE_AI = updated_ai_settings["WHITE_AI"]
+                BLACK_AI = updated_ai_settings["BLACK_AI"]
+                AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
+                if options.get("FLIP_BOARD", False):
+                    flipped = not flipped
+                    print("Board flipped from Tinker Panel")
+                print("Tinker Panel settings applied successfully")
+            else:
+                print("Tinker Panel closed without changes")
+                
+            # Restore main window
+            p.display.set_mode((WIDTH, HEIGHT))
+            p.display.set_caption("Drawback Chess")
+        except Exception as e:
+            print(f"Error in Tinker Panel: {e}")
+            import traceback
+            traceback.print_exc()
+            # Make sure we restore the main window
+            p.display.set_mode((WIDTH, HEIGHT))
+            p.display.set_caption("Drawback Chess")
     else:
-        print("Tinker Panel not available.")
+        print("Tinker Panel not available - see above errors for details.")
 
 def display_ai_status(screen, board):
     if not HAS_AI:

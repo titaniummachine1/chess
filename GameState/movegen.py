@@ -1,6 +1,7 @@
-## movegen.py contains the custom board class for Drawback Chess, which extends the standard python-chess board class. do nto remove this comment
+## movegen.py contains the custom board class for Drawback Chess, which extends the standard python-chess board class.
 import chess
-from GameState.drawback_manager import get_drawback_info
+import random
+from GameState.drawback_manager import DRAWBACKS, get_drawback_info
 
 # Correct standard FEN with the king and queen in their proper places
 defaultfen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -13,26 +14,31 @@ class DrawbackBoard(chess.Board):
       - Drawback-based restrictions.
     """
 
-    def __init__(self, fen=None):
-        # Always start standard
-        if fen is None:
-            fen = defaultfen
-        super().__init__(fen=fen)
+    def __init__(self, fen=chess.STARTING_FEN, white_drawback=None, black_drawback=None):
+        super().__init__(fen)
+        self._white_drawback = white_drawback
+        self._black_drawback = black_drawback
 
-        # Store drawbacks for each color
-        self.drawbacks = {chess.WHITE: None, chess.BLACK: None}
+    def reset(self, fen=chess.STARTING_FEN):
+        """Reset the board to the starting position"""
+        super().reset()
+        self._white_drawback = None
+        self._black_drawback = None
 
-    def reset(self):
-        """Resets the board to the standard starting position and clears drawbacks."""
-        super().set_fen(defaultfen)
-        self.drawbacks = {chess.WHITE: None, chess.BLACK: None}
+    def set_white_drawback(self, drawback):
+        """Set the white drawback"""
+        self._white_drawback = drawback
 
-    def set_drawback(self, color, drawback_name):
-        self.drawbacks[color] = drawback_name
-        print(f"Set drawback for {'White' if color == chess.WHITE else 'Black'}: {drawback_name}")
+    def set_black_drawback(self, drawback):
+        """Set the black drawback"""
+        self._black_drawback = drawback
 
     def get_active_drawback(self, color):
-        return self.drawbacks.get(color, None)
+        """Get the active drawback for the specified color"""
+        if color == chess.WHITE:
+            return self._white_drawback
+        else:
+            return self._black_drawback
 
     # Ignore checks entirely
     def checkers_mask(self):
@@ -122,28 +128,62 @@ class DrawbackBoard(chess.Board):
         return False
 
     def is_legal(self, move):
-        """Check if a move is legal, with Drawback Chess special rules"""
-        # Normal legal moves from our generator
-        if move in self.generate_legal_moves():
+        """Enhanced is_legal that incorporates drawback rules"""
+        # Basic legality check first
+        if not super().is_legal(move):
+            return False
+            
+        # Check drawbacks for the current player
+        if self._check_drawbacks(move, self.turn):
             return True
-
-        # Special case: allow capturing the king
-        captured = self.piece_at(move.to_square)
-        if captured and captured.piece_type == chess.KING:
-            from_piece = self.piece_at(move.from_square)
-            if from_piece and from_piece.color != captured.color:
-                # Ensure move is otherwise valid (no drawback restrictions)
-                active_drawback = self.get_active_drawback(self.turn)
-                if active_drawback:
-                    drawback_info = get_drawback_info(active_drawback)
-                    if drawback_info and "illegal_moves" in drawback_info:
-                        if drawback_info["illegal_moves"](self, self.turn, move):
-                            return False  # Drawback blocks this move
-                return True  # King capture is allowed
-
         return False
+        
+    def _check_drawbacks(self, move, color):
+        """Check if a move is legal according to active drawbacks"""
+        drawback_name = self.get_active_drawback(color)
+        if not drawback_name:
+            return True
+            
+        drawback = DRAWBACKS.get(drawback_name, {})
+        if not drawback or not drawback.get("supported", False):
+            return True
+            
+        check_function_name = drawback.get("check_move")
+        if not check_function_name:
+            return True
+            
+        # Import the drawback module dynamically
+        try:
+            module_name = f"GameState.drawbacks.{drawback_name}"
+            module = __import__(module_name, fromlist=[''])
+            
+            # Get the check function
+            check_function = getattr(module, check_function_name)
+            if not check_function:
+                print(f"Warning: Function {check_function_name} not found in {module_name}")
+                return True
+                
+            # Get parameters if available
+            params = drawback.get("params", {})
+            
+            # Call the check function with parameters
+            if params:
+                return check_function(self, move, color, **params)
+            else:
+                return check_function(self, move, color)
+                
+        except ImportError:
+            print(f"Warning: Failed to import drawback module {drawback_name}")
+            return True
+        except AttributeError as e:
+            print(f"Warning: Failed to get check function for {drawback_name}: {e}")
+            return True
+        except Exception as e:
+            print(f"Error checking drawback {drawback_name}: {e}")
+            return True
 
     def copy(self):
         new_board = DrawbackBoard(fen=self.fen())
-        new_board.drawbacks = self.drawbacks.copy()
+        new_board._white_drawback = self._white_drawback
+        new_board._black_drawback = self._black_drawback
         return new_board

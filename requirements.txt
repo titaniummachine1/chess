@@ -1,4 +1,6 @@
+# Required packages for Drawback Chess
 pygame>=2.0.0
-python-chess>=1.7.0
+pygame_gui>=0.7.0
+chess>=1.9.0
 numpy>=1.21.0
-pygame_gui>=0.6.0
+python-chess>=1.7.0
