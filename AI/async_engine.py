@@ -108,8 +108,8 @@ def start_search(board, depth, time_limit=5):
         asyncio.set_event_loop(loop)
         
     current_search = asyncio.create_task(async_search(board, depth, time_limit))
-    current_progress = f"Thinking at depth {depth}..."
-    print(f"[DEBUG] Search task started successfully")
+    current_progress = f"Thinking at depth {depth} for {time_limit}s..."  # Update progress message
+    print(f"[DEBUG] Search task started successfully with time limit {time_limit}s")
 
 # Other simple functions remain the same
 def get_progress():

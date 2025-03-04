@@ -86,7 +86,6 @@ class DrawbackBoard(chess.Board):
         if active_drawback:
             loss_function = get_drawback_loss_function(active_drawback)
             if loss_function and loss_function(self, self.turn):
-                print(f"Drawback '{active_drawback}' triggered loss condition!")
                 return True
                     
         # No other end conditions - you must capture the king to win

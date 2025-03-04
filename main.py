@@ -17,7 +17,7 @@ from GameState.drawback_manager import DRAWBACKS as AVAILABLE_DRAWBACKS
 
 # Import global settings
 from Globals import (
-    FPS, AI_DEPTH, WHITE_AI, BLACK_AI, DRAWBACKS, 
+    FPS, AI_DEPTH, WHITE_AI, BLACK_AI, DRAWBACKS, TIME_LIMIT,  # Add TIME_LIMIT here
     GAME_OVER, WINNER_COLOR, FLIPPED_BOARD, AI_MOVE_COOLDOWN, SEARCH_IN_PROGRESS,
     TINKER_BUTTON_WIDTH, TINKER_BUTTON_HEIGHT, TINKER_BUTTON_TOP, TINKER_BUTTON_COLOR,
     TEXT_COLOR_WHITE, TEXT_COLOR_BLACK, HIGHLIGHT_COLOR, GOLD_COLOR, STATUS_BG_COLOR
@@ -52,6 +52,7 @@ winner_color = WINNER_COLOR
 flipped = FLIPPED_BOARD
 ai_move_cooldown = AI_MOVE_COOLDOWN
 search_in_progress = SEARCH_IN_PROGRESS
+time_limit = TIME_LIMIT  # Add this line to track the time limit
 tinker_button_rect = p.Rect(WIDTH - TINKER_BUTTON_WIDTH, TINKER_BUTTON_TOP, 
                            TINKER_BUTTON_WIDTH, TINKER_BUTTON_HEIGHT)
 
@@ -108,7 +109,7 @@ def draw_tinker_button(screen):
 
 def open_tinker_panel(board):
     """Open the tinker panel to configure drawbacks and AI settings"""
-    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH
+    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, time_limit  # Add time_limit here
     
     # Stop AI search while in tinker panel to prevent lag
     old_search_in_progress = False
@@ -118,7 +119,7 @@ def open_tinker_panel(board):
     
     if HAS_TINKER_PANEL:
         try:
-            ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH}
+            ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH, "TIME_LIMIT": time_limit}  # Add time_limit
             print("Opening Tinker Panel...")
             tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
             result = tinker_panel.run()
@@ -129,6 +130,8 @@ def open_tinker_panel(board):
                 WHITE_AI = updated_ai_settings["WHITE_AI"]
                 BLACK_AI = updated_ai_settings["BLACK_AI"]
                 AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
+                time_limit = updated_ai_settings.get("TIME_LIMIT", time_limit)  # Update time_limit
+                print(f"Updated AI settings - Depth: {AI_DEPTH}, Time limit: {time_limit}s")
                 
                 # Update drawbacks on the board
                 board.set_white_drawback(white_drawback)
@@ -195,13 +198,13 @@ def handle_ai_turn(board):
     
     # If AI's turn and no search is in progress, start one
     if not search_in_progress:
-        print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH}")
+        print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH} with time limit {time_limit}s")
         print(f"Active drawback: {board.get_active_drawback(board.turn)}")
         # Print number of legal moves for debugging
         legal_move_count = len(list(board.legal_moves))
         print(f"Number of legal moves: {legal_move_count}")
         
-        start_search(board, AI_DEPTH)
+        start_search(board, AI_DEPTH, time_limit)  # Pass time_limit here
         search_in_progress = True
         return
     
