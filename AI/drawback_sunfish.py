@@ -463,16 +463,39 @@ def best_move(board, depth, time_limit=5):
             # Verify legal moves are available with the drawback
             legal_moves = list(board.legal_moves)
             print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
+            
+            # If we have very few legal moves, print them all for debugging
+            if len(legal_moves) < 10:
+                print("All legal moves available:")
+                for i, m in enumerate(legal_moves):
+                    print(f"  {i+1}. {m.uci()}")
+            
+            # If no legal moves, return None immediately
             if not legal_moves:
                 print("WARNING: No legal moves available with this drawback!")
                 return None
+                
+            # If only one legal move, return it immediately
+            if len(legal_moves) == 1:
+                print("Only one legal move available - returning it directly")
+                return legal_moves[0]
         
         engine = DrawbackSunfish()
-        return engine.search(board.copy(), depth, time_limit)
+        result = engine.search(board.copy(), depth, time_limit)
+        
+        # Verify the returned move is actually legal
+        if result and result not in board.legal_moves:
+            print(f"WARNING: AI returned illegal move {result}! Falling back to random move.")
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                return random.choice(legal_moves)
+            return None
+            
+        return result
     except Exception as e:
         import traceback
         print(f"ENGINE ERROR: {str(e)}")
-        print(traceback.format_exc())
+        print(traceback.print_exc())
         # Emergency fallback
         moves = list(board.legal_moves)
         if moves:

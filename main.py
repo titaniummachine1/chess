@@ -109,13 +109,17 @@ def draw_tinker_button(screen):
 
 def open_tinker_panel(board):
     """Open the tinker panel to configure drawbacks and AI settings"""
-    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, time_limit  # Add time_limit here
+    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, time_limit, search_in_progress  # Add search_in_progress
+    
+    # Store current search state to restore after panel closes
+    was_searching = search_in_progress
+    ai_turn_before = (WHITE_AI and board.turn == chess.WHITE) or (BLACK_AI and board.turn == chess.BLACK)
     
     # Stop AI search while in tinker panel to prevent lag
-    old_search_in_progress = False
     if search_in_progress:
-        old_search_in_progress = search_in_progress
+        print("Pausing AI search while tinker panel is open...")
         reset_search()  # Stop any ongoing AI search
+        search_in_progress = False
     
     if HAS_TINKER_PANEL:
         try:
@@ -154,6 +158,13 @@ def open_tinker_panel(board):
             # Clear all events that built up while panel was open
             p.event.clear()
             
+            # Resume AI search if it was active before and it's still AI's turn
+            current_ai_turn = (WHITE_AI and board.turn == chess.WHITE) or (BLACK_AI and board.turn == chess.BLACK)
+            if was_searching and current_ai_turn:
+                print("Resuming AI search after tinker panel closed...")
+                # Set cooldown to allow the main loop to resume properly
+                ai_move_cooldown = 5
+                
         except Exception as e:
             print(f"Error in Tinker Panel: {e}")
             import traceback
@@ -229,29 +240,39 @@ def handle_ai_turn(board):
     
     # If a search is already in progress, check if it's done
     if is_search_complete():
+        print("Search is complete, retrieving result...")
         move = get_result()
+        print(f"AI selected move: {move}")
+        
+        # Explicitly reset search state BEFORE applying the move
+        # to avoid potential state corruption
+        search_in_progress = False
+        reset_search()
         
         if move is None:
+            print("AI returned None for move - searching for fallback move")
             # No good move found, pick a random legal move
             legal_moves = list(board.legal_moves)
             if legal_moves:
                 move = random.choice(legal_moves)
-                print(f"No move from search; fallback move: {move}")
+                print(f"Using fallback random move: {move}")
             else:
                 # No legal moves available
                 game_over = True
                 winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
                 print("No legal moves available for AI; ending game.")
-                search_in_progress = False
-                reset_search()
                 return
         
-        # Apply the selected move - add enhanced debugging
+        # Apply the selected move
         if move:
             # Check if move is legal and why it might not be
-            is_legal = move in board.legal_moves
+            legal_moves = list(board.legal_moves)
+            is_legal = move in legal_moves
+            print(f"Move {move} is {'legal' if is_legal else 'ILLEGAL'}!")
+            print(f"Number of legal moves: {len(legal_moves)}")
+            
             if is_legal:
-                # Move is legal, apply it
+                print(f"Applying AI move: {move}")
                 board.push(move)
                 print(f"AI moved: {move}")
                 print("Board FEN after AI move:", board.fen())
@@ -317,6 +338,11 @@ def handle_ai_turn(board):
         # Reset search state for next turn
         search_in_progress = False
         reset_search()
+    else:
+        # Print a status update occasionally to confirm search is still active
+        if random.random() < 0.05:  # ~5% chance each frame to avoid spamming
+            progress = get_progress()
+            print(f"AI is still thinking: {progress}")
 
 def undo_last_move(board):
     """Safely undo the last move on the board and update game state"""

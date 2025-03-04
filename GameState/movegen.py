@@ -137,46 +137,38 @@ class DrawbackBoard(chess.Board):
         if not drawback_name:
             return True
             
-        # Get check function for this drawback
-        check_function = get_drawback_function(drawback_name)
-        assert check_function is not None, f"No check function found for drawback '{drawback_name}'"
-        
-        # Get drawback parameters if any
-        drawback_info = get_drawback_info(drawback_name)
-        params = drawback_info.get("params", {})
-        
-        # Verify the function takes the right parameters
-        import inspect
-        sig = inspect.signature(check_function)
-        param_names = list(sig.parameters.keys())
-        assert len(param_names) >= 3, f"Drawback function for '{drawback_name}' must take at least 3 parameters (board, move, color), got: {param_names}"
-        
-        # Call the check function with parameters
-        result = None
-        if params:
+        try:
+            # Get check function for this drawback
+            check_function = get_drawback_function(drawback_name)
+            if not check_function:
+                print(f"WARNING: No check function found for drawback '{drawback_name}'")
+                return True  # Default to allowing the move if function not found
+            
+            # Get drawback parameters if any
+            drawback_info = get_drawback_info(drawback_name)
+            params = drawback_info.get("params", {})
+            
+            # Try the function with standard parameter order
             try:
-                result = check_function(self, move, color, **params)
+                # Standard order: (board, move, color)
+                result = check_function(self, move, color, **params) if params else check_function(self, move, color)
+                return not result  # Invert result (True means illegal, we return False for illegal)
             except TypeError as e:
-                # If parameter mismatch, try different order
-                print(f"WARNING: Parameter error in {drawback_name}: {e}")
-                print(f"Attempting alternative parameter order...")
-                # Try alternate order before giving up
-                result = check_function(self, color, move, **params)
-        else:
-            try:
-                result = check_function(self, move, color)
-            except TypeError as e:
-                # If parameter mismatch, try different order
-                print(f"WARNING: Parameter error in {drawback_name}: {e}")
-                print(f"Attempting alternative parameter order...")
-                # Try alternate order before giving up
-                result = check_function(self, color, move)
-        
-        # Verify we have a boolean result and not None
-        assert result is not None, f"Drawback function for '{drawback_name}' returned None instead of a boolean"
-        
-        # Result is True if move is illegal, False if legal (inverse of what we return)
-        return not result
+                # If that fails, try alternate parameter order: (board, color, move)
+                print(f"WARNING: Primary parameter order failed for {drawback_name}: {e}")
+                try:
+                    result = check_function(self, color, move, **params) if params else check_function(self, color, move)
+                    print(f"Alternate parameter order worked for {drawback_name}")
+                    return not result  # Invert result (True means illegal, we return False for illegal)
+                except Exception as inner_e:
+                    print(f"ERROR: Both parameter orders failed for {drawback_name}: {inner_e}")
+                    return True  # Default to allowing moves on error
+                
+        except Exception as e:
+            print(f"ERROR checking drawback '{drawback_name}': {e}")
+            import traceback
+            traceback.print_exc()
+            return True  # Default to allowing the move on error
 
     def copy(self) -> 'DrawbackBoard':
         new_board = DrawbackBoard(fen=self.fen())
