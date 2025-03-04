@@ -5,6 +5,7 @@ import chess
 # Kings cannot capture because they would explode.
 
 DRAWBACK_INFO = {
+    "name": "Atomic Bomb",
     "description": "If your opponent captures a piece adjacent to your king, you lose",
     "check_move": "check_atomic_bomb",
     "supported": True,
@@ -21,10 +22,10 @@ def check_atomic_bomb(board, move, color):
     
     # Kings cannot capture pieces (they would explode)
     if piece and piece.piece_type == chess.KING and board.is_capture(move):
-        return False
+        return True  # Return True to indicate this move is ILLEGAL
         
     # All other moves are allowed
-    return True
+    return False  # Return False to indicate this move is LEGAL
     
 def check_explosion_loss(board, color):
     """

@@ -19,8 +19,15 @@ def illegal_moves(board, move, color):
     Blocks captures where the capturing piece is worth less than the captured piece.
     Exception: Any piece can capture a king.
     """
+    # Add assertions to validate parameters
+    assert board is not None, "Board must not be None"
+    assert move is not None, "Move must not be None"
+    assert isinstance(move, chess.Move), f"Move must be a chess.Move instance, got {type(move)}"
+    assert color in [chess.WHITE, chess.BLACK], f"Color must be chess.WHITE or chess.BLACK, got {color}"
+    
     # Get the piece that's moving
     attacker = board.piece_at(move.from_square)
+    assert attacker is not None, f"No piece found at {chess.square_name(move.from_square)}"
     
     # Get the piece being captured (if any)
     target = board.piece_at(move.to_square)
@@ -37,7 +44,7 @@ def illegal_moves(board, move, color):
     attacker_value = PIECE_VALUES.get(attacker.piece_type, 0)
     target_value = PIECE_VALUES.get(target.piece_type, 0)
     
-    # The move is illegal if the attacker is less thhen in value to the target
+    # The move is illegal if the attacker is less than in value to the target
     if attacker_value < target_value:
         return True  # Block the move
     

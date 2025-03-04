@@ -455,6 +455,18 @@ class DrawbackSunfish:
 def best_move(board, depth, time_limit=5):
     """For use as the main AI interface"""
     try:
+        # Track active drawback for debugging
+        active_drawback = board.get_active_drawback(board.turn)
+        if active_drawback:
+            print(f"AI searching with active drawback: {active_drawback}")
+            
+            # Verify legal moves are available with the drawback
+            legal_moves = list(board.legal_moves)
+            print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
+            if not legal_moves:
+                print("WARNING: No legal moves available with this drawback!")
+                return None
+        
         engine = DrawbackSunfish()
         return engine.search(board.copy(), depth, time_limit)
     except Exception as e:

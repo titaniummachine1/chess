@@ -139,18 +139,44 @@ class DrawbackBoard(chess.Board):
             
         # Get check function for this drawback
         check_function = get_drawback_function(drawback_name)
-        if not check_function:
-            raise AssertionError(f"No check function found for drawback '{drawback_name}'")
+        assert check_function is not None, f"No check function found for drawback '{drawback_name}'"
         
         # Get drawback parameters if any
         drawback_info = get_drawback_info(drawback_name)
         params = drawback_info.get("params", {})
         
+        # Verify the function takes the right parameters
+        import inspect
+        sig = inspect.signature(check_function)
+        param_names = list(sig.parameters.keys())
+        assert len(param_names) >= 3, f"Drawback function for '{drawback_name}' must take at least 3 parameters (board, move, color), got: {param_names}"
+        
         # Call the check function with parameters
+        result = None
         if params:
-            return check_function(self, move, color, **params)
+            try:
+                result = check_function(self, move, color, **params)
+            except TypeError as e:
+                # If parameter mismatch, try different order
+                print(f"WARNING: Parameter error in {drawback_name}: {e}")
+                print(f"Attempting alternative parameter order...")
+                # Try alternate order before giving up
+                result = check_function(self, color, move, **params)
         else:
-            return check_function(self, move, color)
+            try:
+                result = check_function(self, move, color)
+            except TypeError as e:
+                # If parameter mismatch, try different order
+                print(f"WARNING: Parameter error in {drawback_name}: {e}")
+                print(f"Attempting alternative parameter order...")
+                # Try alternate order before giving up
+                result = check_function(self, color, move)
+        
+        # Verify we have a boolean result and not None
+        assert result is not None, f"Drawback function for '{drawback_name}' returned None instead of a boolean"
+        
+        # Result is True if move is illegal, False if legal (inverse of what we return)
+        return not result
 
     def copy(self) -> 'DrawbackBoard':
         new_board = DrawbackBoard(fen=self.fen())
