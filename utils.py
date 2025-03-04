@@ -8,6 +8,13 @@ from GameState.movegen import DrawbackBoard  # Your custom board
 # Global image cache to prevent reloading
 PIECES_CACHE = {}
 BOARD_HEIGHT = 640  # Default value, will be overridden by main.py
+WIDTH = 800
+HEIGHT = 760
+BOARD_HEIGHT = 640
+BOARD_Y_OFFSET = 80
+BOARD_X_OFFSET = 80
+DIMENSION = 8
+SQ_SIZE = BOARD_HEIGHT // DIMENSION
 
 def load_images(square_size):
     """
@@ -159,9 +166,6 @@ def draw_legal_move_indicators(screen, board, from_square, flipped, dimension, y
     """
     square_size = BOARD_HEIGHT // dimension
     
-    # Create a copy of the board to evaluate positions after moves
-    board_copy = board.copy()
-    
     # Get all legal moves from the selected square
     for move in board.legal_moves:
         if move.from_square == from_square:
@@ -181,19 +185,19 @@ def draw_legal_move_indicators(screen, board, from_square, flipped, dimension, y
             is_capture = board.is_capture(move)
             
             # Create a surface for chess.com style indicators
-            s = pygame.Surface((square_size, square_size), pygame.SRCALPHA)
+            s = p.Surface((square_size, square_size), p.SRCALPHA)
             
             if is_capture:
                 # Red outline with semi-transparent fill for captures - chess.com style
                 radius = square_size // 3
                 # Draw transparent red fill
-                pygame.draw.circle(s, (255, 0, 0, 80), (square_size//2, square_size//2), radius)
+                p.draw.circle(s, (255, 0, 0, 80), (square_size//2, square_size//2), radius)
                 # Draw darker red border
-                pygame.draw.circle(s, (255, 0, 0, 160), (square_size//2, square_size//2), radius, max(2, square_size//16))
+                p.draw.circle(s, (255, 0, 0, 160), (square_size//2, square_size//2), radius, max(2, square_size//16))
             else:
                 # Green semi-transparent circle for normal moves - chess.com style
                 radius = square_size // 4  # Slightly smaller than captures
-                pygame.draw.circle(s, (0, 128, 0, 100), (square_size//2, square_size//2), radius)
+                p.draw.circle(s, (0, 128, 0, 100), (square_size//2, square_size//2), radius)
             
             # Blit the surface to the screen
             screen.blit(s, (x_offset + draw_col * square_size, y_offset + draw_row * square_size))

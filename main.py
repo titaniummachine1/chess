@@ -2,39 +2,16 @@ import pygame as p
 import chess
 import random
 import asyncio
+import utils
 
 from utils import load_images, draw_board, draw_pieces, draw_legal_move_indicators
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS
+from Globals import FPS, AI_DEPTH, WHITE_AI, BLACK_AI, DRAWBACKS
+from utils import WIDTH, HEIGHT, BOARD_HEIGHT, BOARD_Y_OFFSET, BOARD_X_OFFSET, DIMENSION, SQ_SIZE
 
-# Game Settings
-FPS = 60
-AI_DEPTH = 4
-WHITE_AI = False
-BLACK_AI = False
-
-AVAILABLE_DRAWBACKS = [
-    "no_knight_moves",
-    "no_bishop_captures",
-    "no_knight_captures",
-    "punching_down",
-    "professional_courtesy",
-    "just_passing_through", 
-    "forward_march",
-    "get_down_mr_president",
-    "vegan",
-    "chivalry",
-    "blinded_by_the_sun",
-    "leaps_and_bounds",
-    "friendly_fire",
-    "covering_fire",
-    "atomic_bomb",
-    "closed_book"
-]
-
-import utils
-BOARD_HEIGHT = 640  # Actual board height
-WIDTH = 800
+# Use the constant defined in utils for board height
+utils.WIDTH = 800
 HEIGHT = 760
 BOARD_HEIGHT = 640
 BOARD_Y_OFFSET = 80
@@ -42,30 +19,17 @@ BOARD_X_OFFSET = 80
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
 
-utils.BOARD_HEIGHT = BOARD_HEIGHT
-
 # UI panel setup
-try:
-    from ui.tinker_panel import TinkerPanel
-    HAS_TINKER_PANEL = True
-    print("Tinker Panel UI loaded successfully")
-except Exception as panel_error:
-    print(f"Warning: Tinker Panel failed to load: {panel_error}")
-    import traceback
-    traceback.print_exc()
-    HAS_TINKER_PANEL = False
+from ui.tinker_panel import TinkerPanel
+HAS_TINKER_PANEL = True
+print("Tinker Panel UI loaded successfully")
 
 # Import AI async functions
-try:
-    print("Attempting to import AI module...")
-    from AI.async_engine import start_search, get_progress, get_result, is_search_complete, reset_search
-    HAS_AI = True
-    print("AI module imported successfully")
-except Exception as e:
-    print(f"Warning: AI module not available. Error: {e}")
-    import traceback
-    traceback.print_exc()
-    HAS_AI = False
+print("Attempting to import AI module...")
+from AI.async_engine import start_search, get_progress, get_result, is_search_complete, reset_search
+HAS_AI = True
+print("AI module imported successfully")
+
 
 # Global state
 game_over = False
@@ -90,7 +54,7 @@ def display_drawbacks(screen, board, flipped):
     black_text = font.render(f"Black: {black_display}", True, p.Color("black"), p.Color("white"))
     
     # Position based on flipped state - this ensures they're always on the correct side
-    if flipped:
+    if not flipped:
         # Flipped: White on bottom of screen, black on top
         screen.blit(white_text, (10, HEIGHT - 30))
         screen.blit(black_text, (10, 10))
