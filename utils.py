@@ -25,7 +25,7 @@ def load_images(square_size):
     
     # Return cached images if they exist for this square size
     cache_key = f"size_{square_size}"
-    if cache_key in PIECES_CACHE:
+    if (cache_key in PIECES_CACHE):
         return PIECES_CACHE[cache_key]
     
     pieces = ['wP', 'wR', 'wN', 'wB', 'wQ', 'wK', 'bP', 'bR', 'bN', 'bB', 'bQ', 'bK']
@@ -201,3 +201,30 @@ def draw_legal_move_indicators(screen, board, from_square, flipped, dimension, y
             
             # Blit the surface to the screen
             screen.blit(s, (x_offset + draw_col * square_size, y_offset + draw_row * square_size))
+
+def draw_move_history(screen, board, flipped, font_size=16, x_pos=700, y_pos=100):
+    """
+    Draw a simple move history on the right side of the screen
+    Useful for showing what moves can be undone with Z
+    """
+    if len(board.move_stack) == 0:
+        return
+        
+    font = p.font.SysFont(None, font_size)
+    
+    # Create header
+    header = font.render("Move History (Z to undo)", True, p.Color("white"))
+    screen.blit(header, (x_pos, y_pos))
+    
+    # Show last 10 moves at most
+    start_idx = max(0, len(board.move_stack) - 10)
+    moves_to_show = board.move_stack[start_idx:]
+    
+    for i, move in enumerate(moves_to_show):
+        move_text = f"{start_idx + i + 1}. {move}"
+        
+        # Highlight the last move in gold
+        color = p.Color("gold") if i == len(moves_to_show) - 1 else p.Color("white")
+        
+        move_surface = font.render(move_text, True, color)
+        screen.blit(move_surface, (x_pos, y_pos + 25 + i * (font_size + 2)))

@@ -1,7 +1,7 @@
 ## movegen.py contains the custom board class for Drawback Chess, which extends the standard python-chess board class.
 import chess
 import random
-from GameState.drawback_manager import DRAWBACKS, get_drawback_info
+from GameState.drawback_manager import DRAWBACKS, get_drawback_info, get_drawback_function, get_drawback_loss_function
 
 # Correct standard FEN with the king and queen in their proper places
 defaultfen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -18,6 +18,7 @@ class DrawbackBoard(chess.Board):
         super().__init__(fen)
         self._white_drawback = white_drawback
         self._black_drawback = black_drawback
+        print(f"DrawbackBoard initialized with white_drawback={white_drawback}, black_drawback={black_drawback}")
 
     def reset(self, fen=chess.STARTING_FEN):
         """Reset the board to the starting position"""
@@ -55,20 +56,22 @@ class DrawbackBoard(chess.Board):
         return self.generate_legal_moves()
 
     def generate_legal_moves(self, from_mask=chess.BB_ALL, to_mask=chess.BB_ALL):
+        """Generate legal moves considering drawbacks"""
+        # Get standard chess moves first
         moves = list(super().generate_pseudo_legal_moves(from_mask, to_mask))
-
+        
+        # Apply drawback restrictions
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
-            drawback_info = get_drawback_info(active_drawback)
-            if drawback_info and "illegal_moves" in drawback_info:
-                filtered = []
-                for m in moves:
-                    if not drawback_info["illegal_moves"](self, self.turn, m):
-                        filtered.append(m)
-                    # Only show blocked move in detailed debugging
-                    # else:
-                    #     print(f"Drawback '{active_drawback}' blocked move: {m}")
-                moves = filtered
+            print(f"Filtering moves for {self.turn} with drawback: {active_drawback}")
+            filtered_moves = []
+            for move in moves:
+                if self._check_drawbacks(move, self.turn):
+                    filtered_moves.append(move)
+                else:
+                    print(f"Drawback '{active_drawback}' blocked move: {move}")
+            return iter(filtered_moves)
+                
         return iter(moves)
 
     def is_variant_end(self):
@@ -87,11 +90,10 @@ class DrawbackBoard(chess.Board):
         # Check for special drawback-related loss conditions
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
-            drawback_info = get_drawback_info(active_drawback)
-            if drawback_info and "loss_condition" in drawback_info:
-                condition = drawback_info["loss_condition"]
-                if callable(condition) and condition(self, self.turn):
-                    return True
+            loss_function = get_drawback_loss_function(active_drawback)
+            if loss_function and loss_function(self, self.turn):
+                print(f"Drawback '{active_drawback}' triggered loss condition!")
+                return True
                     
         # No other end conditions - you must capture the king to win
         return False
@@ -134,9 +136,7 @@ class DrawbackBoard(chess.Board):
             return False
             
         # Check drawbacks for the current player
-        if self._check_drawbacks(move, self.turn):
-            return True
-        return False
+        return self._check_drawbacks(move, self.turn)
         
     def _check_drawbacks(self, move, color):
         """Check if a move is legal according to active drawbacks"""
@@ -144,38 +144,34 @@ class DrawbackBoard(chess.Board):
         if not drawback_name:
             return True
             
-        drawback = DRAWBACKS.get(drawback_name, {})
-        if not drawback or not drawback.get("supported", False):
-            return True
+        # Get check function for this drawback
+        check_function = get_drawback_function(drawback_name)
+        if not check_function:
+            print(f"WARNING: No check function found for drawback '{drawback_name}'")
+            return True  # Allow move if drawback function is missing
         
-        # Debug output for true gentleman checks
-        if drawback_name == "true_gentleman" and self.is_capture(move):
-            target = self.piece_at(move.to_square)
-            if target and target.piece_type == chess.QUEEN:
-                print(f"DEBUG: True Gentleman should block capture of queen at {chess.square_name(move.to_square)}")
-            
-        # Try to get the check function directly from imported module  
         try:
-            from GameState.drawback_manager import get_drawback_function
-            check_function = get_drawback_function(drawback_name)
+            # Get drawback parameters if any
+            drawback_info = get_drawback_info(drawback_name)
+            params = drawback_info.get("params", {})
             
-            if check_function:
-                # Get parameters if available
-                params = drawback.get("params", {})
+            # Call the check function with parameters
+            if params:
+                result = check_function(self, move, color, **params)
+            else:
+                result = check_function(self, move, color)
+            
+            # Log result for debugging
+            if not result:
+                print(f"Drawback '{drawback_name}' rejected move {move}")
                 
-                # Call the check function with parameters
-                if params:
-                    result = check_function(self, move, color, **params)
-                else:
-                    result = check_function(self, move, color)
-                    
-                return result
+            return result
+            
         except Exception as e:
             print(f"Error checking drawback {drawback_name}: {e}")
             import traceback
             traceback.print_exc()
-                
-        return True  # Default to allowing move if there's an error
+            return True  # Allow move if there's an error
 
     def copy(self):
         new_board = DrawbackBoard(fen=self.fen())

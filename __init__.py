@@ -1,0 +1,3 @@
+"""
+Drawback Chess - Root package
+"""

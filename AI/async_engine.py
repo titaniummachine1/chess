@@ -122,7 +122,26 @@ def is_search_complete():
     return current_search is not None and current_search.done()
 
 def reset_search():
+    """
+    Reset the search state completely.
+    Ensures any canceled searches don't affect future results.
+    """
     global current_search, current_progress, current_result
+    
+    # Cancel existing search task if it exists
+    if current_search and not current_search.done():
+        try:
+            current_search.cancel()
+            print("Active search task cancelled")
+        except Exception as e:
+            print(f"Error cancelling search: {e}")
+    
+    # Reset all state variables
     current_search = None
     current_progress = "Idle"
     current_result = None
+    
+    # Give a short moment for task cleanup
+    time.sleep(0.1)
+    
+    print("Search state fully reset")
