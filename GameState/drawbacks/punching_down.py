@@ -14,7 +14,7 @@ PIECE_VALUES = {
     chess.KING: 20000    # Unchanged - can always be captured
 }
 
-def illegal_moves(board, color, move):
+def illegal_moves(board, move, color):
     """
     Blocks captures where the capturing piece is worth less than the captured piece.
     Exception: Any piece can capture a king.
@@ -48,9 +48,11 @@ DRAWBACK_INFO = {
     "name": "Punching Down",
     "description": "Your pieces can only capture pieces of equal or lesser value (exception: kings can always be captured)",
     "illegal_moves": illegal_moves,
+    "check_move": "illegal_moves",  # Changed to a string, not function reference
     "loss_condition": None,
     "piece_value_override": PIECE_VALUES,  # Use our modified values
     "positional_override": {
         # No positional overrides
-    }
+    },
+    "supported": True  # Added the required supported flag
 }

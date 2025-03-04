@@ -61,9 +61,9 @@ def display_drawbacks(screen, board, flipped):
     white_drawback = board.get_active_drawback(chess.WHITE) or "None"
     black_drawback = board.get_active_drawback(chess.BLACK) or "None"
     
-    # Format the drawback names for display
-    white_display = white_drawback.replace('_', ' ').title()
-    black_display = black_drawback.replace('_', ' ').title()
+    # Just show the formatted name instead of the description
+    white_display = white_drawback.replace('_', ' ').title() if white_drawback != "None" else "None"
+    black_display = black_drawback.replace('_', ' ').title() if black_drawback != "None" else "None"
     
     # Create the text surfaces
     white_text = font.render(f"White: {white_display}", True, TEXT_COLOR_WHITE, TEXT_COLOR_BLACK)
@@ -82,7 +82,8 @@ def display_drawbacks(screen, board, flipped):
 def display_current_turn(screen, board):
     """Display whose turn it is at the top of the screen"""
     font = p.font.SysFont(None, 22)
-    turn_text = "White's Turn" if board.turn == chess.WHITE else "Black's Turn"
+    # Simplify to just "White" or "Black"
+    turn_text = "White" if board.turn == chess.WHITE else "Black"
     color = TEXT_COLOR_WHITE if board.turn == chess.WHITE else TEXT_COLOR_BLACK
     bg_color = TEXT_COLOR_BLACK if board.turn == chess.WHITE else TEXT_COLOR_WHITE
     text_surf = font.render(turn_text, True, color, bg_color)
