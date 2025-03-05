@@ -109,7 +109,7 @@ def draw_tinker_button(screen):
 
 def open_tinker_panel(board):
     """Open the tinker panel to configure drawbacks and AI settings"""
-    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, time_limit, search_in_progress  # Add search_in_progress
+    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, time_limit, search_in_progress, ai_move_cooldown
     
     # Store current search state to restore after panel closes
     was_searching = search_in_progress
@@ -123,7 +123,7 @@ def open_tinker_panel(board):
     
     if HAS_TINKER_PANEL:
         try:
-            ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH, "TIME_LIMIT": time_limit}  # Add time_limit
+            ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH, "TIME_LIMIT": time_limit}
             print("Opening Tinker Panel...")
             tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
             result = tinker_panel.run()
@@ -134,7 +134,7 @@ def open_tinker_panel(board):
                 WHITE_AI = updated_ai_settings["WHITE_AI"]
                 BLACK_AI = updated_ai_settings["BLACK_AI"]
                 AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
-                time_limit = updated_ai_settings.get("TIME_LIMIT", time_limit)  # Update time_limit
+                time_limit = updated_ai_settings.get("TIME_LIMIT", time_limit)
                 print(f"Updated AI settings - Depth: {AI_DEPTH}, Time limit: {time_limit}s")
                 
                 # Update drawbacks on the board
@@ -158,13 +158,17 @@ def open_tinker_panel(board):
             # Clear all events that built up while panel was open
             p.event.clear()
             
-            # Resume AI search if it was active before and it's still AI's turn
+            # Completely reset AI search state - don't resume old search
+            search_in_progress = False
+            reset_search()
+            
+            # Check if it's AI's turn after closing the panel
             current_ai_turn = (WHITE_AI and board.turn == chess.WHITE) or (BLACK_AI and board.turn == chess.BLACK)
-            if was_searching and current_ai_turn:
-                print("Resuming AI search after tinker panel closed...")
-                # Set cooldown to allow the main loop to resume properly
-                ai_move_cooldown = 5
-                
+            if current_ai_turn:
+                print("Starting fresh AI search after tinker panel closed...")
+                # Force a delay before starting new search to avoid recursion issues
+                ai_move_cooldown = FPS // 2  # Set a cooldown of half a second
+            
         except Exception as e:
             print(f"Error in Tinker Panel: {e}")
             import traceback
@@ -204,7 +208,26 @@ def handle_ai_turn(board):
     """
     global game_over, winner_color, ai_move_cooldown, search_in_progress
     
-    if not HAS_AI or game_over or board.is_variant_end():
+    # Don't do anything if game is over or cooldown is active
+    if not HAS_AI or game_over or ai_move_cooldown > 0:
+        return
+    
+    # Check variant end directly without using is_variant_end() to avoid recursion
+    white_king_alive = False
+    black_king_alive = False
+    
+    # Use piece_map() instead of _board which doesn't exist
+    for square, piece in board.piece_map().items():
+        if piece.piece_type == chess.KING:
+            if piece.color == chess.WHITE:
+                white_king_alive = True
+            else:
+                black_king_alive = True
+    
+    if not white_king_alive or not black_king_alive:
+        game_over = True
+        winner_color = chess.WHITE if not black_king_alive else chess.BLACK
+        print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins by capturing the king!")
         return
     
     # If AI's turn and no search is in progress, start one
@@ -213,28 +236,48 @@ def handle_ai_turn(board):
         active_drawback = board.get_active_drawback(board.turn)
         if active_drawback:
             print(f"AI turn with active drawback: {active_drawback}")
-            # Verify legal moves with this drawback
-            legal_moves = list(board.legal_moves)
-            print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
-            
-            # Check the first few legal moves to verify they're correct
-            if legal_moves:
-                print("Sample legal moves:")
-                for i, move in enumerate(legal_moves[:5]):
-                    print(f"  {i+1}. {move.uci()}")
-            else:
-                print("No legal moves available with this drawback - ending game")
-                game_over = True
-                winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
-                return
+            # Use our direct non-recursive method to get legal moves
+            try:
+                # Generate moves directly without recursion
+                legal_moves = []
+                for move in super(DrawbackBoard, board).generate_pseudo_legal_moves():
+                    if not board._is_drawback_illegal(move, board.turn):
+                        legal_moves.append(move)
+                
+                print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
+                
+                # Check the first few legal moves to verify they're correct
+                if legal_moves:
+                    print("Sample legal moves:")
+                    for i, move in enumerate(legal_moves[:5]):
+                        print(f"  {i+1}. {move.uci()}")
+                else:
+                    print("No legal moves available with this drawback - ending game")
+                    game_over = True
+                    winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
+                    return
+            except Exception as e:
+                print(f"Error safely checking legal moves: {str(e)}")
         
         print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH} with time limit {time_limit}s")
         print(f"Active drawback: {board.get_active_drawback(board.turn)}")
+        
         # Print number of legal moves for debugging
-        legal_move_count = len(list(board.legal_moves))
+        try:
+            # Use safer approach to count legal moves
+            legal_moves = []
+            for move in super(DrawbackBoard, board).generate_pseudo_legal_moves():
+                if board._check_drawbacks(move, board.turn):
+                    legal_moves.append(move)
+            legal_move_count = len(legal_moves)
+        except Exception as e:
+            print(f"Error counting legal moves: {str(e)}")
+            legal_move_count = -1  # Error indicator
+            
         print(f"Number of legal moves: {legal_move_count}")
         
-        start_search(board, AI_DEPTH, time_limit)  # Pass time_limit here
+        # Start the search
+        start_search(board, AI_DEPTH, time_limit)
         search_in_progress = True
         return
     

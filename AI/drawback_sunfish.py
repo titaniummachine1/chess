@@ -34,21 +34,25 @@ class DrawbackSunfish:
         self.eval_cache = {}  # Cache for position evaluations
         
     def evaluate_position(self, board, drawbacks=None):
-        """Use the dedicated evaluation function with PST adjustments if available"""
-        # Check cache first
-        key = board.fen()
-        if key in self.eval_cache:
-            return self.eval_cache[key]
-        
-        # Check if we have book weights to apply
-        pst_weights = getattr(self, 'pst_adjustment_weights', None)
-        
-        # Use the improved evaluation function with possible PST adjustments
-        score = eval_position(board, pst_weights)
-        
-        # Cache the result
-        self.eval_cache[key] = score
-        return score
+        """Enhanced evaluation function that considers drawbacks"""
+        # Check if the position is a variant loss due to drawbacks
+        if board.is_variant_loss():
+            return -MATE_UPPER  # Return worst possible score
+            
+        # Get active drawback for current side
+        active_drawback = board.get_active_drawback(board.turn)
+        if active_drawback:
+            # Count legal moves - heavily penalize positions with few moves
+            legal_count = len(list(board.legal_moves))
+            if legal_count == 0:
+                return -MATE_UPPER  # No legal moves is a loss
+            mobility_bonus = min(100, legal_count * 5)  # Encourage positions with more legal moves
+        else:
+            mobility_bonus = 0
+            
+        # Use regular evaluation + mobility bonus
+        regular_eval = eval_position(board, drawbacks)
+        return regular_eval + mobility_bonus
         
     def quiescence(self, board, alpha, beta, depth=0, max_depth=5):
         """Quiescence search to only evaluate quiet positions"""
@@ -123,7 +127,9 @@ class DrawbackSunfish:
         self.nodes += 1
         alpha_orig = alpha
         
-        # Check for checkmate opportunity - do this early to find mates quickly!
+        # Check for instant wins FIRST - before anything else
+        
+        # 1. Direct king capture - highest priority in Drawback Chess
         opponent_king_square = None
         for sq, piece in board.piece_map().items():
             if piece.piece_type == chess.KING and piece.color != board.turn:
@@ -135,6 +141,38 @@ class DrawbackSunfish:
             for move in board.legal_moves:
                 if move.to_square == opponent_king_square:
                     return MATE_UPPER - ply  # Immediate king capture (checkmate)
+        
+        # 2. Atomic Bomb drawback special win condition
+        # Check if we can capture a piece adjacent to opponent's king
+        if opponent_king_square:
+            # Get the active drawback for the opponent
+            opponent_color = not board.turn
+            opponent_drawback = board.get_active_drawback(opponent_color)
+            
+            if opponent_drawback == "atomic_bomb":
+                # Check pieces adjacent to the king
+                king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
+                
+                # Check all squares adjacent to king
+                for file_offset in [-1, 0, 1]:
+                    for rank_offset in [-1, 0, 1]:
+                        if file_offset == 0 and rank_offset == 0:
+                            continue  # Skip the king's own square
+                            
+                        adj_file = king_file + file_offset
+                        adj_rank = king_rank + rank_offset
+                        
+                        # Check if valid square
+                        if 0 <= adj_file <= 7 and 0 <= adj_rank <= 7:
+                            adj_square = chess.square(adj_file, adj_rank)
+                            piece_at_adj = board.piece_at(adj_square)
+                            
+                            # If there's an opponent's piece adjacent to their king
+                            if piece_at_adj and piece_at_adj.color == opponent_color:
+                                # Check if we can capture this piece
+                                for move in board.legal_moves:
+                                    if move.to_square == adj_square:
+                                        return MATE_UPPER - ply - 1  # Immediate win via atomic bomb
         
         # Check transposition table
         key = board.fen()
@@ -364,7 +402,7 @@ class DrawbackSunfish:
                 self.pst_adjustment_weights = {}
                 self.book_move_selected = None
             
-            # Check for immediate checkmate moves first (king captures in drawback chess)
+            # Check for immediate win conditions first - king captures and atomic bomb
             opponent_king_square = None
             for sq, piece in board.piece_map().items():
                 if piece.piece_type == chess.KING and piece.color != board.turn:
@@ -372,10 +410,64 @@ class DrawbackSunfish:
                     break
                     
             if opponent_king_square:
+                # 1. Direct king capture
                 for move in board.legal_moves:
                     if move.to_square == opponent_king_square:
                         print("Found immediate checkmate (king capture)!")
                         return move  # Return king capture immediately
+                
+                # 2. Atomic bomb win condition
+                opponent_color = not board.turn
+                opponent_drawback = board.get_active_drawback(opponent_color)
+                
+                if opponent_drawback == "atomic_bomb":
+                    # Find winning moves that capture pieces adjacent to king
+                    king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
+                    for file_offset in [-1, 0, 1]:
+                        for rank_offset in [-1, 0, 1]:
+                            if file_offset == 0 and rank_offset == 0:
+                                continue  # Skip the king's own square
+                                
+                            adj_file = king_file + file_offset
+                            adj_rank = king_rank + rank_offset
+                            
+                            if 0 <= adj_file <= 7 and 0 <= adj_rank <= 7:
+                                adj_square = chess.square(adj_file, adj_rank)
+                                piece_at_adj = board.piece_at(adj_square)
+                                
+                                # If there's an opponent piece adjacent to their king
+                                if piece_at_adj and piece_at_adj.color == opponent_color:
+                                    # Find capturing moves
+                                    for move in board.legal_moves:
+                                        if move.to_square == adj_square:
+                                            print("Found atomic bomb win condition!")
+                                            return move  # Return winning move immediately
+            
+            # Check for drawback-related loss conditions first
+            active_drawback = board.get_active_drawback(board.turn)
+            if active_drawback:
+                # Check if we have any legal moves with this drawback
+                legal_moves = list(board.legal_moves)
+                if not legal_moves:
+                    print("WARNING: AI has no legal moves due to drawback restrictions")
+                    return None  # No legal moves = loss
+                    
+                # Check for specific loss conditions
+                from GameState.drawback_manager import get_drawback_loss_function
+                loss_function = get_drawback_loss_function(active_drawback)
+                if loss_function and loss_function(board, board.turn):
+                    print(f"WARNING: AI detected it would lose due to drawback '{active_drawback}'")
+                    # If we're going to lose, pick a random move as a last resort
+                    return random.choice(legal_moves)
+            
+            # Check if the position is already a variant loss
+            if board.is_variant_loss():
+                print("WARNING: AI is already in a losing position")
+                # Pick a random move if we're already lost
+                legal_moves = list(board.legal_moves)
+                if legal_moves:
+                    return random.choice(legal_moves)
+                return None
             
             start_time = time.time()
             best_move = None
@@ -480,8 +572,48 @@ def best_move(board, depth, time_limit=5):
                 print("Only one legal move available - returning it directly")
                 return legal_moves[0]
         
+        # Check for immediate win moves before starting the search
+        # 1. King captures
+        opponent_king_square = None
+        for sq, piece in board.piece_map().items():
+            if piece.piece_type == chess.KING and piece.color != board.turn:
+                opponent_king_square = sq
+                break
+                
+        if opponent_king_square:
+            for move in board.legal_moves:
+                if move.to_square == opponent_king_square:
+                    print("DIRECT WIN: Found immediate king capture!")
+                    return move
+                    
+            # 2. Atomic bomb win condition
+            opponent_color = not board.turn
+            opponent_drawback = board.get_active_drawback(opponent_color)
+            
+            if opponent_drawback == "atomic_bomb":
+                king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
+                
+                for move in board.legal_moves:
+                    target = board.piece_at(move.to_square)
+                    if target and target.color == opponent_color:
+                        target_file = chess.square_file(move.to_square)
+                        target_rank = chess.square_rank(move.to_square)
+                        
+                        # If capturing a piece adjacent to opponent's king
+                        if abs(target_file - king_file) <= 1 and abs(target_rank - king_rank) <= 1:
+                            print("ATOMIC BOMB WIN: Found winning capture near opponent's king!")
+                            return move
+        
         engine = DrawbackSunfish()
-        result = engine.search(board.copy(), depth, time_limit)
+        
+        # Mark the board as being in a search to avoid triggering loss conditions during evaluation
+        board_copy = board.copy()
+        if hasattr(board_copy, "_in_search"):
+            board_copy._in_search = True
+        else:
+            setattr(board_copy, "_in_search", True)
+            
+        result = engine.search(board_copy, depth, time_limit)
         
         # Verify the returned move is actually legal
         if result and result not in board.legal_moves:

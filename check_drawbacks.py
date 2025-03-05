@@ -20,6 +20,7 @@ def print_function_signature(func):
 def check_drawback(drawback_name):
     """Test a single drawback to ensure it works correctly"""
     print(f"\nChecking drawback: {drawback_name}")
+    assert drawback_name in DRAWBACKS, f"Drawback '{drawback_name}' not found in loaded drawbacks"
     
     # Create a test board with the drawback
     board = DrawbackBoard()
@@ -27,9 +28,7 @@ def check_drawback(drawback_name):
     
     # Get the drawback function
     check_function = get_drawback_function(drawback_name)
-    if not check_function:
-        print(f"ERROR: No check function found for drawback {drawback_name}")
-        return False
+    assert check_function is not None, f"No check function found for drawback {drawback_name}"
         
     # Print function signature to check parameter order
     print_function_signature(check_function)
@@ -38,9 +37,7 @@ def check_drawback(drawback_name):
     initial_legal_count = len(list(board.legal_moves))
     print(f"Initial position has {initial_legal_count} legal moves")
     
-    if initial_legal_count == 0:
-        print(f"ERROR: Drawback {drawback_name} prevents all legal moves in the initial position")
-        return False
+    assert initial_legal_count > 0, f"ERROR: Drawback {drawback_name} prevents all legal moves in the initial position"
     
     # Check a few standard moves against the drawback
     test_moves = [
@@ -49,27 +46,10 @@ def check_drawback(drawback_name):
     ]
     
     for move in test_moves:
-        try:
-            # Try both parameter orders to diagnose issues
-            try:
-                is_illegal = check_function(board, move, chess.WHITE)
-                print(f"Move {move.uci()} is {'illegal' if is_illegal else 'legal'} according to {drawback_name}")
-                print(f"Parameter order (board, move, color) works correctly")
-            except TypeError as e:
-                print(f"Error with (board, move, color) order: {e}")
-                try:
-                    is_illegal = check_function(board, chess.WHITE, move)
-                    print(f"Move {move.uci()} is {'illegal' if is_illegal else 'legal'} according to {drawback_name}")
-                    print(f"Parameter order (board, color, move) works correctly")
-                except TypeError as e2:
-                    print(f"Error with (board, color, move) order: {e2}")
-                    print(f"FAILED: Function does not accept either parameter order")
-                    return False
-        except Exception as e:
-            print(f"ERROR: Exception while checking move {move.uci()}: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+        # Try with standard parameter order
+        is_illegal = check_function(board, move, chess.WHITE)
+        print(f"Move {move.uci()} is {'illegal' if is_illegal else 'legal'} according to {drawback_name}")
+        print(f"Parameter order (board, move, color) works correctly")
     
     print(f"Drawback {drawback_name} appears to be working correctly")
     return True
