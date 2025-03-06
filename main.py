@@ -288,8 +288,10 @@ def handle_ai_turn(board):
         print(f"Legal moves: {len(list(board.legal_moves))}")
     
     # Get depth and time limit from settings
-    from AI.engine_settings import get_ai_settings
-    depth, time_limit, smart_time_management = get_ai_settings()
+    from Globals import AI_DEPTH, TIME_LIMIT
+    depth = AI_DEPTH
+    time_limit = TIME_LIMIT
+    smart_time_management = USE_SMART_TIME_MANAGEMENT
     
     # Initialize engine
     from AI.enhanced_async_engine import engine_state, start_search, reset_search, get_result
