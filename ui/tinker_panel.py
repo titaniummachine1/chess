@@ -136,6 +136,13 @@ class TinkerPanel:
             text="Time Limit (sec)"
         )
         
+        # Smart time management checkbox
+        smart_time_y = self.add_center_element(checkbox_height)
+        self.smart_time_checkbox = Checkbox(
+            self.width/2 - 120, smart_time_y, 15, "Smart Time Management", font=self.small_font
+        )
+        self.smart_time_checkbox.checked = self.ai_settings.get("SMART_TIME_MANAGEMENT", False)
+        
         # Add extra space before drawback lists
         self.add_center_element(20)
         
@@ -219,6 +226,7 @@ class TinkerPanel:
         self.black_ai_checkbox.draw(self.window)
         self.ai_depth_slider.draw(self.window)
         self.time_limit_slider.draw(self.window)  # Draw the time limit slider
+        self.smart_time_checkbox.draw(self.window)  # Draw the smart time management checkbox
         
         # Draw drawback lists
         white_hover = self.white_drawbacks.draw(self.window)
@@ -293,6 +301,12 @@ class TinkerPanel:
                 self.time_limit_slider.start_drag(pos)
                 return True
             
+            # Handle Smart Time Management checkbox
+            if self.smart_time_checkbox.is_clicked(pos):
+                self.smart_time_checkbox.toggle()
+                self.ai_settings["SMART_TIME_MANAGEMENT"] = self.smart_time_checkbox.checked
+                return True
+            
             # Handle drawback list clicks - pass the board for immediate application
             if self.white_drawbacks.handle_click(pos, self.board):
                 return True
@@ -363,3 +377,21 @@ class TinkerPanel:
         # Return the selected drawbacks, AI settings, and other options
         return (self.white_drawbacks.selected_drawback, self.black_drawbacks.selected_drawback, 
                 self.ai_settings, {"FLIP_BOARD": self.flip_board})
+
+    def apply_settings(self):
+        """Apply all settings to the main game."""
+        if self.callback:
+            # Gather all settings
+            settings = {
+                "WHITE_AI": self.white_ai_checkbox.checked,
+                "BLACK_AI": self.black_ai_checkbox.checked,
+                "AI_DEPTH": self.ai_depth_slider.value,
+                "TIME_LIMIT": self.time_limit_slider.value,
+                "SMART_TIME_MANAGEMENT": self.smart_time_checkbox.checked,
+                "WHITE_DRAWBACK": self.white_drawbacks.get_selected(),
+                "BLACK_DRAWBACK": self.black_drawbacks.get_selected(),
+                "FLIP_BOARD": self.flip_board
+            }
+            
+            # Execute callback with settings
+            self.callback(settings)

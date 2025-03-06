@@ -106,7 +106,7 @@ class DrawbackBot:
         
         return regular_eval + mobility_score + safety_score
         
-    def search(self, board, depth, time_limit=None):
+    def search(self, board, depth, time_limit=None, use_smart_time_management=False):
         """
         Search for the best move in the current position to the specified depth.
         Delegates to the negamax function for the actual search.
@@ -115,6 +115,7 @@ class DrawbackBot:
             board: Current position
             depth: Search depth
             time_limit: Optional time limit in seconds
+            use_smart_time_management: If True, yield early if best move is stable
             
         Returns:
             Tuple of (score, best_move)
@@ -132,6 +133,11 @@ class DrawbackBot:
         best_move = None
         best_score = -MATE_UPPER
         start_overall = time.time()
+        
+        # Smart time management variables
+        last_best_move = None
+        stable_move_start_time = None
+        stable_move_threshold = 10.0  # Seconds to wait before accepting a stable move
         
         # Set initial depth attribute for move_value function
         self.depth = 0  # Start at 0, will be updated in the loop
@@ -199,55 +205,64 @@ class DrawbackBot:
                         # If an error occurs, use previous best move/score and continue
                         continue
                 
-                search_time = time.time() - start_time
+                # Get the best move from the transposition table
+                current_best_move = None
                 
-                # Find best move from tt
-                key = board.zobrist_hash() if hasattr(board, 'zobrist_hash') else str(board.fen())
+                # Look for the best move in the tt
+                pos_key = self.get_position_key(board)
+                if pos_key in self.tt:
+                    entry = self.tt[pos_key]
+                    if entry.move:
+                        # Convert UCI string to Move object
+                        entry_move_uci = entry.move
+                        for legal_move in board.legal_moves:
+                            if legal_move.uci() == entry_move_uci:
+                                current_best_move = legal_move
+                                break
                 
-                # Check if we have a move in the transposition table
-                best_tt_move = None
-                if key in self.tt and self.tt[key].move:
-                    tt_move_uci = self.tt[key].move  # This is now a UCI string
-                    
-                    # Convert the UCI string back to a Move object
-                    for legal_move in board.legal_moves:
-                        if legal_move.uci() == tt_move_uci:
-                            best_tt_move = legal_move
-                            break
-                            
-                    best_move = best_tt_move
+                # Calculate search time for this iteration
+                elapsed = time.time() - start_time
+                total_elapsed = time.time() - start_overall
+                
+                # Update best move and score
+                if current_best_move:
+                    best_move = current_best_move
                     best_score = score
                     
-                    # Report search results with clearer information
-                    print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {tt_move_uci}, Time: {search_time:.2f}s")
-                    
-                    # Early exit if we found a forced mate
-                    if score > MATE_LOWER or score < -MATE_LOWER:
-                        print(f"Found mate in {(MATE_UPPER - abs(score)) // 2} moves, stopping search")
-                        break
-                        
-                    # Check time after completing a depth - use nearly full allocation of time
-                    if time.time() - start_overall > time_limit * 0.98:
-                        print(f"Time limit nearly reached after completing depth {current_depth}")
-                        break
-                else:
-                    # If no move found in TT, report this but continue
-                    print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: None, Time: {search_time:.2f}s")
-                    
-                    # Try to extract a move from previous depths
-                    if best_move is None and current_depth > 1:
-                        for prev_key, entry in self.tt.items():
-                            if entry.move:
-                                # Convert UCI string to Move object
-                                entry_move_uci = entry.move
-                                for legal_move in board.legal_moves:
-                                    if legal_move.uci() == entry_move_uci:
-                                        best_move = legal_move
-                                        best_score = entry.value
-                                        print(f"Using move from previous depth: {entry_move_uci}")
-                                        break
-                                if best_move:  # Break outer loop if move found
+                    # Smart time management: Check if move has been stable
+                    if use_smart_time_management and current_depth >= 3:
+                        if current_best_move == last_best_move:
+                            # Move is stable from previous iteration
+                            if stable_move_start_time is None:
+                                # First time this move is stable
+                                stable_move_start_time = time.time()
+                                print(f"Found stable move: {current_best_move.uci()}, starting stability clock")
+                            else:
+                                # Move has been stable for a while
+                                stable_duration = time.time() - stable_move_start_time
+                                if stable_duration >= stable_move_threshold:
+                                    print(f"Best move {current_best_move.uci()} has been stable for {stable_duration:.2f}s, early termination")
                                     break
+                        else:
+                            # Move changed, reset stability timer
+                            stable_move_start_time = None
+                    
+                    # Remember this move for stability tracking
+                    last_best_move = current_best_move
+                    
+                    # Report progress
+                    print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {best_move.uci()}, Time: {elapsed:.2f}s")
+                
+                # Check if we've completed the max depth
+                if current_depth == depth:
+                    print(f"Search completed in {total_elapsed:.2f}s, final best move: {best_move.uci()}")
+                
+                # If using smart time management and we've reached a sufficient depth,
+                # consider stopping if time is nearly up
+                if use_smart_time_management and current_depth >= 4:
+                    if total_elapsed > time_limit * 0.80:
+                        print(f"Using smart time management to stop at depth {current_depth} after {total_elapsed:.2f}s")
+                        break
         except Exception as e:
             print(f"Fatal error in search: {e}")
             import traceback
@@ -460,6 +475,13 @@ class DrawbackBot:
         print(f"Search complete. Chosen move: {move.uci()}")
         return move
     
+    def get_position_key(self, board):
+        """Get a unique key for the position, preferring Zobrist hash if available."""
+        if hasattr(board, 'zobrist_hash'):
+            return board.zobrist_hash()
+        else:
+            return str(board.fen())
+
 def best_move(board, depth=3, time_limit=5, book_move_bonuses=None):
     """
     Convenience function to get the best move without creating an engine instance.

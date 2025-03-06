@@ -39,7 +39,7 @@ class AsyncEngineState:
 # Create a singleton instance
 engine_state = AsyncEngineState()
 
-def run_search(board, depth, time_limit=5):
+def run_search(board, depth, time_limit=5, smart_time_management=False):
     """
     Run the engine search in a separate thread
     
@@ -47,6 +47,7 @@ def run_search(board, depth, time_limit=5):
         board: Chess board position
         depth: Search depth (passed directly to AI)
         time_limit: Time limit in seconds (used exactly as provided)
+        smart_time_management: If True, terminate early if best move is stable
         
     Returns:
         Best move found by the engine
@@ -58,6 +59,8 @@ def run_search(board, depth, time_limit=5):
     
     start_time = time.time()
     print(f"Search started at depth {depth}, time limit {time_limit}s")
+    if smart_time_management:
+        print("Using smart time management: will stop early if best move is stable")
     
     # Always use a copy of the board for thread safety
     board_copy = board.copy()
@@ -119,7 +122,7 @@ def run_search(board, depth, time_limit=5):
     print(f"Using exact time limit: {time_limit}s")
     
     # Call the engine to get best move
-    result = select_best_move(board_copy, depth, time_limit, book_move_bonuses)
+    result = select_best_move(board_copy, depth, time_limit, book_move_bonuses, smart_time_management)
     
     # Log search statistics
     elapsed = time.time() - start_time
@@ -135,7 +138,7 @@ def run_search(board, depth, time_limit=5):
     # Return the search result, normally never use book moves directly
     return result.move
 
-async def async_search(board, depth, time_limit=5):
+async def async_search(board, depth, time_limit=5, smart_time_management=False):
     """
     Run the chess engine search asynchronously
     
@@ -143,6 +146,7 @@ async def async_search(board, depth, time_limit=5):
         board: Chess board position
         depth: Search depth 
         time_limit: Time limit in seconds
+        smart_time_management: If True, terminate early if best move is stable
     """
     global engine_state
     engine_state.current_progress = f"Analyzing position at depth {depth}..."
@@ -150,56 +154,86 @@ async def async_search(board, depth, time_limit=5):
     engine_state.depth = depth
     engine_state.time_limit = time_limit
     
+    # Create a partial function with the search parameters
+    search_func = partial(run_search, 
+                          board=board, 
+                          depth=depth, 
+                          time_limit=time_limit,
+                          smart_time_management=smart_time_management)
+    
+    # Submit to executor and get future
+    future = engine_state.search_executor.submit(search_func)
+    
     try:
-        # Make a copy of the board for thread safety
-        board_copy = board.copy()
+        # Wait for the search to complete asynchronously
+        while not future.done():
+            # Update progress while waiting
+            elapsed = time.time() - engine_state.start_time
+            engine_state.current_progress = f"Analyzing position... (Elapsed: {elapsed:.1f}s)"
+            await asyncio.sleep(0.1)
+            
+        # Get the result when done
+        best_move = future.result()
+        elapsed = time.time() - engine_state.start_time
         
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            engine_state.search_executor,
-            partial(run_search, board_copy, depth, time_limit)
-        )
+        # Store result
+        engine_state.current_result = {
+            'move': best_move.uci() if best_move else None,
+            'time': elapsed,
+            'nodes': 0,  # We don't have access to node count here
+            'depth': depth
+        }
         
-        engine_state.current_result = result
+        engine_state.current_progress = f"Search complete in {elapsed:.2f}s"
+        print(f"Search is complete, retrieving result...")
         
-        if result:
-            engine_state.current_progress = "Analysis complete"
-        else:
-            engine_state.current_progress = "No move found"
     except Exception as e:
-        print(f"ASYNC SEARCH ERROR: {str(e)}")
+        print(f"Error in async search: {e}")
         traceback.print_exc()
-        engine_state.current_progress = f"Search error: {str(e)}"
-        engine_state.current_result = None
+        engine_state.current_progress = f"Search failed: {str(e)}"
+        engine_state.current_result = {'move': None, 'error': str(e)}
 
-def start_search(board, depth, time_limit=5):
+def start_search(board, depth, time_limit=5, smart_time_management=False):
     """
-    Start a new asynchronous search task
+    Start a non-blocking search for the best move
     
     Args:
         board: Chess board position
         depth: Search depth
         time_limit: Time limit in seconds
+        smart_time_management: If True, terminate early if best move is stable
+        
+    Returns:
+        True if search started successfully, False otherwise
     """
     global engine_state
     
-    # Cancel any existing search first
+    # Don't start a new search if one is in progress
     if engine_state.current_search and not engine_state.current_search.done():
-        engine_state.current_search.cancel()
-        print("Cancelled existing search")
+        print("Search already in progress, please wait or reset")
+        return False
         
-    # Make sure we have an event loop
+    # Create and start the search task
+    async def search_task():
+        await async_search(board, depth, time_limit, smart_time_management)
+        
+    # Start the search task
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-    # Start the new search task
-    engine_state.current_search = asyncio.create_task(async_search(board, depth, time_limit))
-    engine_state.current_progress = f"Thinking at depth {depth} for {time_limit}s..."
-    engine_state.start_time = time.time()
-    print(f"[DEBUG] Search task started successfully with time limit {time_limit}s")
+        # Get or create an event loop
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop running, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        # Create and set the search task
+        engine_state.current_search = asyncio.create_task(search_task())
+        print(f"[DEBUG] Search task started successfully with time limit {time_limit}s")
+        return True
+    except Exception as e:
+        print(f"Failed to start search: {e}")
+        return False
 
 def get_progress():
     """Get the current progress message"""

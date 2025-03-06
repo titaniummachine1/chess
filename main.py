@@ -25,6 +25,9 @@ from Globals import (
     TEXT_COLOR_WHITE, TEXT_COLOR_BLACK, HIGHLIGHT_COLOR, GOLD_COLOR, STATUS_BG_COLOR
 )
 
+# Add smart time management setting (default to False)
+USE_SMART_TIME_MANAGEMENT = True
+
 # Use the enhanced async engine
 from AI.enhanced_async_engine import (
     start_search, get_result, is_search_complete, 
@@ -54,7 +57,6 @@ winner_color = WINNER_COLOR
 flipped = FLIPPED_BOARD
 ai_move_cooldown = AI_MOVE_COOLDOWN
 search_in_progress = SEARCH_IN_PROGRESS
-time_limit = TIME_LIMIT  # Add this line to track the time limit
 tinker_button_rect = p.Rect(WIDTH - TINKER_BUTTON_WIDTH, TINKER_BUTTON_TOP, 
                            TINKER_BUTTON_WIDTH, TINKER_BUTTON_HEIGHT)
 
@@ -111,7 +113,7 @@ def draw_tinker_button(screen):
 
 def open_tinker_panel(board):
     """Open the tinker panel to configure drawbacks and AI settings"""
-    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, time_limit, search_in_progress, ai_move_cooldown
+    global WHITE_AI, BLACK_AI, flipped, AI_DEPTH, TIME_LIMIT, search_in_progress, ai_move_cooldown, USE_SMART_TIME_MANAGEMENT
     
     # Store current search state to restore after panel closes
     was_searching = search_in_progress
@@ -125,7 +127,13 @@ def open_tinker_panel(board):
     
     if HAS_TINKER_PANEL:
         try:
-            ai_settings = {"WHITE_AI": WHITE_AI, "BLACK_AI": BLACK_AI, "AI_DEPTH": AI_DEPTH, "TIME_LIMIT": time_limit}
+            ai_settings = {
+                "WHITE_AI": WHITE_AI, 
+                "BLACK_AI": BLACK_AI, 
+                "AI_DEPTH": AI_DEPTH, 
+                "TIME_LIMIT": TIME_LIMIT,
+                "SMART_TIME_MANAGEMENT": USE_SMART_TIME_MANAGEMENT
+            }
             print("Opening Tinker Panel...")
             tinker_panel = TinkerPanel(board_reference=board, ai_settings=ai_settings)
             result = tinker_panel.run()
@@ -136,8 +144,9 @@ def open_tinker_panel(board):
                 WHITE_AI = updated_ai_settings["WHITE_AI"]
                 BLACK_AI = updated_ai_settings["BLACK_AI"]
                 AI_DEPTH = updated_ai_settings.get("AI_DEPTH", AI_DEPTH)
-                time_limit = updated_ai_settings.get("TIME_LIMIT", time_limit)
-                print(f"Updated AI settings - Depth: {AI_DEPTH}, Time limit: {time_limit}s")
+                TIME_LIMIT = updated_ai_settings.get("TIME_LIMIT", TIME_LIMIT)
+                USE_SMART_TIME_MANAGEMENT = updated_ai_settings.get("SMART_TIME_MANAGEMENT", USE_SMART_TIME_MANAGEMENT)
+                print(f"Updated AI settings - Depth: {AI_DEPTH}, Time limit: {TIME_LIMIT}s, Smart Time Management: {USE_SMART_TIME_MANAGEMENT}")
                 
                 # Update drawbacks on the board
                 board.set_white_drawback(white_drawback)
@@ -312,32 +321,46 @@ def handle_ai_turn(board):
         
         # Ensure depth and time limit are valid
         search_depth = max(1, AI_DEPTH)
-        search_time_limit = max(0.5, time_limit)
+        search_time_limit = max(0.5, TIME_LIMIT)
         
         print(f"Starting AI search for {('White' if board.turn else 'Black')} at depth {search_depth} with time limit {search_time_limit}s")
         
-        # Start the search using our enhanced async engine
-        start_search(board, search_depth, search_time_limit)
+        # Start the search using our enhanced async engine, passing the smart time management setting
+        start_search(board, search_depth, search_time_limit, USE_SMART_TIME_MANAGEMENT)
         search_in_progress = True
         return
     
-    # If a search is already in progress, check if it's done
-    if is_search_complete():
-        print("Search is complete, retrieving result...")
-        move = get_result()
-        print(f"AI selected move: {move}")
+    # If a search is complete, apply the move
+    if search_in_progress and is_search_complete():
+        # Get the move from the engine
+        result = get_result()
+        print(f"AI selected move: {result}")
         
-        # Explicitly reset search state BEFORE applying the move
-        # to avoid potential state corruption
+        # Reset search state for next turn
         search_in_progress = False
         reset_search()
         
-        if move is None:
-            print("AI returned None for move - searching for fallback move")
-            # No good move found, pick a random legal move
+        # Extract the move from the result
+        move = None
+        if result:
+            if isinstance(result, dict) and 'move' in result:
+                # Result is a dictionary with a 'move' key (from newer async engine)
+                move_uci = result['move']
+                if move_uci:
+                    # Convert UCI string to Move object
+                    for legal_move in board.legal_moves:
+                        if legal_move.uci() == move_uci:
+                            move = legal_move
+                            break
+            else:
+                # Result is directly a Move object (from older engine versions)
+                move = result
+        
+        # If no move found, try to pick the first legal move as fallback
+        if not move:
             legal_moves = list(board.legal_moves)
             if legal_moves:
-                move = legal_moves[0]  # Use first legal move instead of random for determinism
+                move = legal_moves[0]
                 print(f"Selected fallback move: {move}")
             else:
                 print("No legal moves available - game should be over")
@@ -368,7 +391,7 @@ def handle_ai_turn(board):
         if engine_state.start_time is not None:
             current_time = time.time()
             elapsed_time = current_time - engine_state.start_time
-            search_time_limit = max(0.5, time_limit)
+            search_time_limit = max(0.5, TIME_LIMIT)
             
             # If we've exceeded the time limit, force completion
             if elapsed_time > search_time_limit * 1.5:  # Give a 50% buffer to be safe

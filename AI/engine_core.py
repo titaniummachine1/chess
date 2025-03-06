@@ -115,7 +115,7 @@ def check_drawback_loss_conditions(board):
     # No loss conditions detected
     return (False, None, None)
 
-def select_best_move(board, depth, time_limit, book_move_bonuses=None):
+def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_time_management=False):
     """
     Unified function to select the best move for a position
     
@@ -124,6 +124,7 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None):
         depth: Maximum search depth
         time_limit: Time limit in seconds
         book_move_bonuses: Dictionary of book moves with bonus values
+        smart_time_management: If True, terminate early if best move is stable
         
     Returns:
         EngineResult containing move, score, and search statistics
@@ -167,7 +168,7 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None):
         
         # Let the DrawbackBot handle the search with its own iterative deepening
         # This avoids nested iterative deepening loops
-        score, best_move = engine.search(board, depth, time_limit=max_time)
+        score, best_move = engine.search(board, depth, time_limit=max_time, use_smart_time_management=smart_time_management)
         
         elapsed = time.time() - start_time
         
