@@ -426,7 +426,7 @@ class DrawbackBot:
         # Go through all moves and search them
         for score, move in scored_moves:
             # Apply Late Move Reduction - search less deeply on low-priority moves
-            if len(board.legal_moves) >= 4 and depth >= 3 and num_searched >= 2 and not board.is_capture(move):
+            if len(legal_moves) >= 4 and depth >= 3 and num_searched >= 2 and not board.is_capture(move):
                 # Create a copy of the board for LMR
                 lmr_board_copy = board.copy()
                 lmr_board_copy.push(move)
