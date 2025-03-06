@@ -89,10 +89,7 @@ def check_explosion_loss(board, color):
     capture_file = chess.square_file(last_capture_square)
     capture_rank = chess.square_rank(last_capture_square)
     
-    # Print debug info for atomic bomb check
-    print(f"Atomic Bomb Check: King at {chess.square_name(king_square)}, capture at {chess.square_name(last_capture_square)}")
-    print(f"Distance: file={abs(king_file - capture_file)}, rank={abs(king_rank - capture_rank)}")
-    
+
     # If the file and rank differences are at most 1, they're adjacent
     if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
         if king_square != last_capture_square:  # Make sure we're not checking the king's own square
