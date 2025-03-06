@@ -44,17 +44,8 @@ except Exception as panel_error:
     traceback.print_exc()
     HAS_TINKER_PANEL = False
 
-# Import AI async functions
-try:
-    print("Attempting to import AI module...")
-    from AI.async_engine import start_search, get_progress, get_result, is_search_complete, reset_search
-    HAS_AI = True
-    print("AI module imported successfully")
-except Exception as e:
-    print(f"Warning: AI module not available. Error: {e}")
-    import traceback
-    traceback.print_exc()
-    HAS_AI = False
+# Flag indicating AI is available
+HAS_AI = True
 
 # Global state variables
 game_over = GAME_OVER
