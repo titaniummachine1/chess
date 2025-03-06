@@ -6,6 +6,7 @@ import pygame as p
 import chess
 import random
 import asyncio
+import time
 
 # Import utilities and board drawing functions
 from utils import load_images, draw_board, draw_pieces, draw_legal_move_indicators
@@ -160,15 +161,15 @@ def open_tinker_panel(board):
             p.event.clear()
             
             # Completely reset AI search state - don't resume old search
-            search_in_progress = False
             reset_search()
+            search_in_progress = False
             
             # Check if it's AI's turn after closing the panel
             current_ai_turn = (WHITE_AI and board.turn == chess.WHITE) or (BLACK_AI and board.turn == chess.BLACK)
             if current_ai_turn:
                 print("Starting fresh AI search after tinker panel closed...")
-                # Force a delay before starting new search to avoid recursion issues
-                ai_move_cooldown = FPS // 2  # Set a cooldown of half a second
+                # Force a short delay before starting new search to avoid UI freeze
+                ai_move_cooldown = 2  # Set a short cooldown to let the UI refresh
             
         except Exception as e:
             print(f"Error in Tinker Panel: {e}")
@@ -177,6 +178,9 @@ def open_tinker_panel(board):
             # Make sure we restore the main window
             p.display.set_mode((WIDTH, HEIGHT))
             p.display.set_caption("Drawback Chess")
+            # Reset search state in case of error
+            reset_search()
+            search_in_progress = False
     else:
         print("Tinker Panel not available - see above errors for details.")
         
@@ -268,6 +272,13 @@ def handle_ai_turn(board):
     
     # If AI's turn and no search is in progress, start one
     if not search_in_progress:
+        # Check whose turn it is and if that player is AI-controlled
+        current_player_is_ai = (board.turn == chess.WHITE and WHITE_AI) or (board.turn == chess.BLACK and BLACK_AI)
+        
+        if not current_player_is_ai:
+            # Not AI's turn, do nothing
+            return
+            
         # Get the current active drawback for this side
         active_drawback = board.get_active_drawback(board.turn)
         
@@ -299,10 +310,10 @@ def handle_ai_turn(board):
             import traceback
             traceback.print_exc()
         
-        print(f"Starting AI search for {('White' if board.turn else 'Black')} at depth {AI_DEPTH} with time limit {TIME_LIMIT}s")
+        print(f"Starting AI search for {('White' if board.turn else 'Black')} at depth {AI_DEPTH} with time limit {time_limit}s")
         
         # Start the search using our enhanced async engine
-        start_search(board, AI_DEPTH, TIME_LIMIT)
+        start_search(board, AI_DEPTH, time_limit)
         search_in_progress = True
         return
     
@@ -347,6 +358,54 @@ def handle_ai_turn(board):
             print(f"Error applying move: {str(e)}")
             import traceback
             traceback.print_exc()
+    else:
+        # Check if search has been running too long and force completion
+        from AI.enhanced_async_engine import engine_state
+        if engine_state.start_time is not None:
+            current_time = time.time()
+            elapsed_time = current_time - engine_state.start_time
+            # If we've exceeded the time limit, force completion
+            if elapsed_time > time_limit * 1.5:  # Give a 50% buffer to be safe
+                print(f"Search exceeded time limit ({elapsed_time:.1f}s > {time_limit}s), forcing completion...")
+                
+                # Get whatever move we have so far
+                move = get_result()
+                
+                # If no move available, try to get a legal move
+                if move is None:
+                    legal_moves = list(board.legal_moves)
+                    if legal_moves:
+                        move = legal_moves[0]
+                        print(f"No move from search, selected first legal move: {move}")
+                    else:
+                        print("No legal moves available - game should be over")
+                        game_over = True
+                        winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
+                        search_in_progress = False
+                        reset_search()
+                        return
+                
+                # Reset search state
+                search_in_progress = False
+                reset_search()
+                
+                # Apply the move
+                try:
+                    board.push(move)
+                    print(f"Move applied after timeout: {move}")
+                    
+                    # Check for game end conditions
+                    game_over, winner_color, end_message = check_game_end_conditions(board)
+                    if game_over:
+                        print(f"Game over after AI move: {end_message}")
+                        return
+                        
+                    # Set cooldown
+                    ai_move_cooldown = AI_MOVE_COOLDOWN
+                except Exception as e:
+                    print(f"Error applying move: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
 
 def undo_last_move(board):
     """Safely undo the last move on the board and update game state"""

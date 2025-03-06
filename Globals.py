@@ -7,7 +7,7 @@ FPS = 60
 AI_DEPTH = 7
 WHITE_AI = True
 BLACK_AI = True
-TIME_LIMIT = 7  # Default AI time limit in seconds
+TIME_LIMIT = 10  # Default AI time limit in seconds
 
 # Game State Globals
 GAME_OVER = False

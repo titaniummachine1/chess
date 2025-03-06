@@ -13,7 +13,7 @@ import random
 # Import engine components
 from AI.drawback_Bot import best_move as bot_best_move
 from AI.ai_utils import get_king_capture_move, MATE_LOWER, MATE_UPPER, MAX_DEPTH
-from AI.book_handler import BookMoveSelector
+from AI.book_handler import BookMoveSelector, get_book_move
 from AI.evaluation import evaluate_position
 from GameState.drawback_manager import get_drawback_loss_function
 
@@ -117,8 +117,8 @@ def check_drawback_loss_conditions(board):
 
 def select_best_move(board, depth=3, time_limit=1.0):
     """
-    Select the best move using the engine and book.
-    This is the main entry point for the AI system.
+    Enhanced unified function to select the best move in the current position.
+    Abstracts the engine complexity and provides cleaner interface.
     
     Args:
         board: Chess board position
@@ -126,87 +126,116 @@ def select_best_move(board, depth=3, time_limit=1.0):
         time_limit: Time limit in seconds
         
     Returns:
-        An EngineResult object with the selected move and stats
+        EngineResult object with move, score, principal variation and stats
     """
+    assert board is not None, "Board cannot be None"
+    
     start_time = time.time()
     
-    # Mark board as being in search context to skip slow checks during search
-    board._in_search = True
+    # Always work with a copy of the board for thread safety
+    board_copy = board.copy()
     
-    try:
-        # Always check for direct king captures first (unique to Drawback Chess)
-        king_capture = get_king_capture_move(board)
-        if king_capture:
+    # First check for immediate win conditions
+    # 1. Direct king capture
+    for move in board_copy.legal_moves:
+        target = board_copy.piece_at(move.to_square)
+        if target and target.piece_type == chess.KING:
+            # Found immediate win!
             return EngineResult(
-                move=king_capture,
-                score=MATE_UPPER,
-                pv=[king_capture],
+                move=move,
+                score=9900,
+                pv=[move.uci()],
                 nodes=1,
-                time=time.time() - start_time
+                time=0.01
             )
+    
+    # First try book move
+    try:
+        # Always import inside function to avoid circular imports
+        from AI.book_handler import get_book_move 
         
-        # Extract book move bonuses from the info
-        book_move, book_info = book_selector.get_weighted_book_move(board)
-        book_move_bonuses = book_info.get("book_move_bonuses", {})
-        special_move = book_info.get("special_move", None)
-        all_book_moves = book_info.get("all_book_moves", [])
+        if hasattr(board_copy, 'get_active_drawback'):
+            active_drawback = board_copy.get_active_drawback(board_copy.turn)
+            print(f"Checking book moves with drawback: {active_drawback}")
+            
+        book_move = get_book_move(board_copy)
+        if book_move:
+            # Make sure book move is legal with current drawbacks
+            if book_move in board_copy.legal_moves:
+                print(f"Using book move: {book_move.uci()}")
+                return EngineResult(
+                    move=book_move,
+                    score=50,  # Modest score for book moves
+                    pv=[book_move.uci()],
+                    nodes=1,
+                    time=0.1
+                )
+            else:
+                print(f"Book move {book_move.uci()} is illegal with current drawbacks, falling back to search")
+    except ImportError:
+        print("Book handling not available, falling back to search")
+        pass
         
-        # Apply book move bonuses during search, but let the AI choose the final move
-        if book_move_bonuses:
-            # There are book moves, but we'll let the search make the final decision
-            print(f"Found {len(book_move_bonuses)} legal book moves for this position")
-            if special_move:
-                print(f"Special book move: {special_move} (gets 50cp bonus)")
+    # Set up time management
+    start_time = time.time()
+    max_time = min(time_limit, 30.0)  # Cap at 30 seconds to prevent hangs
+    
+    # Use the DrawbackBot if available
+    try:
+        from AI.drawback_Bot import DrawbackBot
+        engine = DrawbackBot()
+        
+        # Start with iterative deepening from lower depths
+        for current_depth in range(1, depth + 1):
+            # Check if we've used more than 80% of our time budget
+            elapsed = time.time() - start_time
+            if elapsed > max_time * 0.8:
+                break
                 
-            # Run the search with book move information
-            # We let the search make the decision rather than returning the book move directly
-            move = bot_best_move(board, depth, time_limit, book_move_bonuses)
+            # Do a limited depth search
+            score, move = engine.search(board_copy, current_depth, time_limit=max_time - elapsed)
             
-            # Calculate elapsed time
+            # If we found a move, save it as our best so far
+            if move:
+                best_move = move
+                best_score = score
+                
+                # Early exit if we found a winning move
+                if score > 9000:  # Near mate score
+                    break
+                    
+        # Check if we found a move
+        if 'best_move' in locals():
             elapsed = time.time() - start_time
-            
-            # Ensure we have a move, even if engine failed
-            if not move and len(list(board.legal_moves)) > 0:
-                # Fallback to the suggested book move if available
-                if book_move and book_move in board.legal_moves:
-                    move = book_move
-                    print(f"Search failed, using suggested book move: {move}")
-                else:
-                    # Fallback to first legal move (better than random for determinism)
-                    stats = analyze_position(board)
-                    move = stats.legal_moves[0] if stats.legal_moves else None
-                    print(f"Search failed, using first legal move: {move}")
-            
             return EngineResult(
-                move=move,
-                score=0,  # We don't have the score from the engine here
-                pv=[move] if move else [],
-                nodes=0,  # We don't have node count
+                move=best_move,
+                score=best_score,
+                pv=[best_move.uci()],
+                nodes=engine.nodes,
                 time=elapsed
             )
-        else:
-            # No book moves, run normal search
-            move = bot_best_move(board, depth, time_limit)
-            
-            # Calculate elapsed time
-            elapsed = time.time() - start_time
-            
-            # Ensure we have a move, even if engine failed
-            if not move and len(list(board.legal_moves)) > 0:
-                # Fallback to first legal move (better than random for determinism)
-                stats = analyze_position(board)
-                move = stats.legal_moves[0] if stats.legal_moves else None
-            
-            return EngineResult(
-                move=move,
-                score=0,  # We don't have the score from the engine here
-                pv=[move] if move else [],
-                nodes=0,  # We don't have node count
-                time=elapsed
-            )
-    finally:
-        # Always clear the search flag when done
-        board._in_search = False
+    except Exception as e:
+        print(f"Error using DrawbackBot: {str(e)}")
+        import traceback
+        traceback.print_exc()
+    
+    # If we reach here, all above methods failed - use fallback
+    # Just pick the first available legal move
+    legal_moves = list(board_copy.legal_moves)
+    if legal_moves:
+        fallback_move = legal_moves[0]
+        elapsed = time.time() - start_time
+        print(f"Using fallback move: {fallback_move.uci()}")
+        return EngineResult(
+            move=fallback_move,
+            score=0,
+            pv=[fallback_move.uci()],
+            nodes=1,
+            time=elapsed
+        )
+        
+    # No legal moves available
+    return EngineResult(move=None, score=-9999, pv=[], nodes=0, time=0)
 
 def evaluate_current_position(board, include_drawback_effects=True):
     """

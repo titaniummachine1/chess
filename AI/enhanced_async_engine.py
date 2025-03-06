@@ -181,9 +181,38 @@ def get_progress():
     return engine_state.current_progress
 
 def get_result():
-    """Get the result of the search"""
+    """
+    Get the result of the current or completed search
+    
+    Returns:
+        The best move found by the engine, or None if search is still running or failed
+    """
     global engine_state
-    return engine_state.current_result
+    
+    # If search is complete, return the result
+    if engine_state.current_result is not None:
+        return engine_state.current_result
+        
+    # If search is still running but has been going for at least the time limit,
+    # check if we can extract a partial result from the engine
+    if (engine_state.current_search and 
+        engine_state.start_time and 
+        engine_state.time_limit > 0 and
+        time.time() - engine_state.start_time >= engine_state.time_limit):
+        
+        # Search has exceeded time limit but hasn't been properly completed
+        print(f"Search time limit reached but no result available. Forcing termination.")
+        
+        # Try to cancel the search
+        if not engine_state.current_search.done():
+            engine_state.current_search.cancel()
+            
+        # In this case, we need to find a valid move some other way
+        # For now, we'll return None and let the calling code handle it with fallback logic
+        return None
+        
+    # Otherwise, search is still running or hasn't been started
+    return None
 
 def is_search_complete():
     """Check if the search is complete"""

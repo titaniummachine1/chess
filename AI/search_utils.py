@@ -29,126 +29,54 @@ def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
     """
     bot.nodes += 1
     
-    # Check for direct win opportunity (king capture in Drawback Chess)
-    opponent_king_square = None
-    for sq, piece in board.piece_map().items():
-        if piece.piece_type == chess.KING and piece.color != board.turn:
-            opponent_king_square = sq
-            break
-            
-    if opponent_king_square:
-        for move in board.legal_moves:
-            if move.to_square == opponent_king_square:
-                # Found immediate win (king capture)!
-                return MATE_UPPER - depth
-    
-    # Check for draws and stalemates (no legal moves)
-    if not any(True for _ in board.legal_moves):
-        # This is a draw in standard chess, but in Drawback Chess could be a win or loss
-        if board.is_variant_loss():
-            return -MATE_UPPER + depth
-        return 0  # Draw
-    
-    # Check for drawback-specific win conditions
-    if opponent_king_square:
-        # Get opponent's drawback
-        opponent_color = not board.turn
-        opponent_drawback = board.get_active_drawback(opponent_color)
+    # Early return if maximum depth reached to prevent excessive recursion
+    if depth >= max_depth:
+        return bot.evaluate_position(board)
         
-        # Check for Atomic Bomb win condition
-        if opponent_drawback == "atomic_bomb":
-            king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
-            
-            # Look for captures adjacent to opponent's king
-            for move in board.legal_moves:
-                if board.is_capture(move):
-                    to_file, to_rank = chess.square_file(move.to_square), chess.square_rank(move.to_square)
-                    if abs(to_file - king_file) <= 1 and abs(to_rank - king_rank) <= 1:
-                        # Found atomic bomb win!
-                        return MATE_UPPER - depth - 1
-    
-    # Static evaluation
+    # Stand pat score - evaluate current position
     stand_pat = bot.evaluate_position(board)
     
-    # Stand pat cutoff
+    # Beta cutoff check
     if stand_pat >= beta:
         return beta
-    if alpha < stand_pat:
-        alpha = stand_pat
         
-    # Maximum normal depth check
-    if depth >= max_depth:
-        # Even at max depth, if the stand_pat score is high, look a bit deeper
-        # for potential win conditions to avoid horizon effect
-        if stand_pat < MATE_LOWER and stand_pat > 500:
-            # Only extend depth for promising positions
-            pass
-        else:
-            return alpha
+    # Adjust alpha if standing pat is better
+    alpha = max(alpha, stand_pat)
     
-    # Generate tactical moves (captures and threats)
+    # Get tactical moves sorted by MVV/LVA (Most Valuable Victim/Least Valuable Attacker)
     tactical_moves = []
-    
-    # First, add captures with MVV-LVA scoring
     for move in board.legal_moves:
-        score = 0
-        is_tactical = False
-        
-        # Score captures
-        if board.is_capture(move):
-            is_tactical = True
-            target = board.piece_at(move.to_square)
-            attacker = board.piece_at(move.from_square)
-            if target and attacker:
-                target_symbol = target.symbol().upper()
-                attacker_symbol = attacker.symbol().upper()
-                target_value = PIECE_VALUES.get(target_symbol, (0, 0))[0]
-                attacker_value = PIECE_VALUES.get(attacker_symbol, (0, 0))[0]
-                score = target_value - attacker_value/10
+        # Only include captures and promotions in quiescence search
+        if board.is_capture(move) or move.promotion:
+            # Score the move for sorting
+            score = 0
+            
+            # Handle capture moves
+            if board.is_capture(move):
+                victim = board.piece_at(move.to_square)
+                aggressor = board.piece_at(move.from_square)
                 
-                # King capture is the highest priority
-                if target.piece_type == chess.KING:
-                    score = 10000  # Huge score for king captures
-        
-        # Check for attacking moves - look deeper at these
-        if not is_tactical:
-            board_copy = board.copy()
-            try:
-                board_copy.push(move)
-                # In Drawback Chess, we need to check for actual threats, not just checks
-                # Look for moves that threaten the opponent's king
-                king_in_danger = False
-                for king_sq, piece in board_copy.piece_map().items():
-                    if piece and piece.piece_type == chess.KING and piece.color != board.turn:
-                        attackers = board_copy.attackers(board.turn, king_sq)
-                        if attackers:
-                            king_in_danger = True
-                            is_tactical = True
-                            score = 300  # High score for king threats
-                            break
-                            
-                # Also consider moves that put our pieces in a position to attack the king
-                if not king_in_danger and opponent_king_square:
-                    # Find pieces that are getting into attack position
-                    moved_piece = board.piece_at(move.from_square)
-                    if moved_piece:
-                        king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
-                        to_file, to_rank = chess.square_file(move.to_square), chess.square_rank(move.to_square)
+                if victim and aggressor:
+                    victim_symbol = victim.symbol().upper()
+                    aggressor_symbol = aggressor.symbol().upper()
+                    victim_value = PIECE_VALUES.get(victim_symbol, (0, 0))[0]
+                    aggressor_value = PIECE_VALUES.get(aggressor_symbol, (0, 0))[0]
+                    
+                    # MVV-LVA scoring: 10 * victim value - attacker value
+                    score = 10 * victim_value - aggressor_value
+                    
+                    # Bonus for capturing with less valuable piece
+                    if victim_value > aggressor_value:
+                        score += 50
                         
-                        # Pieces moving closer to enemy king
-                        king_distance = abs(to_file - king_file) + abs(to_rank - king_rank)
-                        if king_distance <= 2:  # Close to king
-                            is_tactical = True
-                            score = 50  # Lower priority but still worth checking
-            except Exception:
-                continue  # Skip problematic moves
-        
-        # Add tactical moves to our search list
-        if is_tactical:
+            # Handle promotion moves
+            if move.promotion:
+                score += 900  # Queen promotion value
+                
             tactical_moves.append((score, move))
     
-    # Sort moves: captures by score, threats after
-    tactical_moves.sort(key=lambda x: x[0], reverse=True)
+    # Sort moves by score in descending order
+    tactical_moves.sort(reverse=True)
     
     # Search tactical moves
     for _, move in tactical_moves:
@@ -167,7 +95,8 @@ def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
                         aggressor_value = PIECE_VALUES.get(aggressor_symbol, (0, 0))[0]
                     
                         # Skip "bad" captures in deep quiescence unless they threaten something
-                        if victim_value < aggressor_value * 0.9 and depth >= 1:
+                        # More conservative approach - skip only very clearly bad captures
+                        if victim_value < aggressor_value * 0.8 and depth >= 2:
                             continue
                             
             board.push(move)
@@ -179,11 +108,14 @@ def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
             if score > alpha:
                 alpha = score
         except Exception:
+            # If move causes an error, pop it and continue
+            if board.move_stack and board.move_stack[-1] == move:
+                board.pop()
             continue  # Skip problematic moves
     
     return alpha
 
-def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescence=True):
+def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescence=True, start_time=None, time_limit=None):
     """
     Enhanced negamax search algorithm optimized for Drawback Chess.
     Includes null move pruning, killer moves, history heuristics and transposition tables.
@@ -196,10 +128,17 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         beta: Beta bound
         allow_null: Whether null move pruning is allowed
         can_enter_quiescence: Whether search can enter quiescence at leaf nodes
+        start_time: Optional start time for time limit checking
+        time_limit: Optional time limit in seconds
         
     Returns:
         Position score
     """
+    # Time limit check at the beginning of each call
+    if start_time and time_limit and time.time() - start_time > time_limit:
+        # Signal time limit reached by returning the current alpha
+        return alpha
+        
     # Check for direct win opportunity (king capture in Drawback Chess)
     for move in board.legal_moves:
         target = board.piece_at(move.to_square)
@@ -306,6 +245,11 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
     # Iterate through moves
     for move in moves:
         bot.nodes += 1
+        
+        # Check time limit periodically (every 1000 nodes)
+        if start_time and time_limit and bot.nodes % 1000 == 0:
+            if time.time() - start_time > time_limit:
+                return alpha  # Return current best score
         
         try:
             # Apply book move bonuses if available
