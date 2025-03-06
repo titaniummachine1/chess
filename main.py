@@ -23,6 +23,15 @@ from Globals import (
     TEXT_COLOR_WHITE, TEXT_COLOR_BLACK, HIGHLIGHT_COLOR, GOLD_COLOR, STATUS_BG_COLOR
 )
 
+# Use the enhanced async engine instead of the old one
+from AI.enhanced_async_engine import (
+    start_search, get_result, is_search_complete, 
+    reset_search, get_progress
+)
+
+# Import engine core utilities for position analysis
+from AI.engine_core import analyze_position
+
 # UI panel setup
 try:
     from ui.tinker_panel import TinkerPanel
@@ -232,21 +241,19 @@ def handle_ai_turn(board):
     
     # If AI's turn and no search is in progress, start one
     if not search_in_progress:
-        # Add additional debugging for drawbacks
+        # Get the current active drawback for this side
         active_drawback = board.get_active_drawback(board.turn)
-        if active_drawback:
-            print(f"AI turn with active drawback: {active_drawback}")
-            # Use our direct non-recursive method to get legal moves
-            try:
-                # Generate moves directly without recursion
-                legal_moves = []
-                for move in super(DrawbackBoard, board).generate_pseudo_legal_moves():
-                    if not board._is_drawback_illegal(move, board.turn):
-                        legal_moves.append(move)
-                
+        
+        # Use engine_core's analyze_position to safely check legal moves
+        try:
+            position_stats = analyze_position(board)
+            legal_moves = position_stats.legal_moves
+            
+            if active_drawback:
+                print(f"AI turn with active drawback: {active_drawback}")
                 print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
                 
-                # Check the first few legal moves to verify they're correct
+                # Log first few legal moves for debugging
                 if legal_moves:
                     print("Sample legal moves:")
                     for i, move in enumerate(legal_moves[:5]):
@@ -256,28 +263,19 @@ def handle_ai_turn(board):
                     game_over = True
                     winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
                     return
-            except Exception as e:
-                print(f"Error safely checking legal moves: {str(e)}")
-        
-        print(f"Starting AI search for turn {board.turn} at depth {AI_DEPTH} with time limit {time_limit}s")
-        print(f"Active drawback: {board.get_active_drawback(board.turn)}")
-        
-        # Print number of legal moves for debugging
-        try:
-            # Use safer approach to count legal moves
-            legal_moves = []
-            for move in super(DrawbackBoard, board).generate_pseudo_legal_moves():
-                if board._check_drawbacks(move, board.turn):
-                    legal_moves.append(move)
-            legal_move_count = len(legal_moves)
+            else:
+                print("AI turn with no drawback restrictions")
+                print(f"Legal moves: {len(legal_moves)}")
+                
         except Exception as e:
-            print(f"Error counting legal moves: {str(e)}")
-            legal_move_count = -1  # Error indicator
-            
-        print(f"Number of legal moves: {legal_move_count}")
+            print(f"Error analyzing position: {str(e)}")
+            import traceback
+            traceback.print_exc()
         
-        # Start the search
-        start_search(board, AI_DEPTH, time_limit)
+        print(f"Starting AI search for {('White' if board.turn else 'Black')} at depth {AI_DEPTH} with time limit {TIME_LIMIT}s")
+        
+        # Start the search using our enhanced async engine
+        start_search(board, AI_DEPTH, TIME_LIMIT)
         search_in_progress = True
         return
     
@@ -298,94 +296,21 @@ def handle_ai_turn(board):
             legal_moves = list(board.legal_moves)
             if legal_moves:
                 move = random.choice(legal_moves)
-                print(f"Using fallback random move: {move}")
+                print(f"Selected random move: {move}")
             else:
-                # No legal moves available
+                print("No legal moves available - game should be over")
                 game_over = True
                 winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
-                print("No legal moves available for AI; ending game.")
                 return
         
-        # Apply the selected move
-        if move:
-            # Check if move is legal and why it might not be
-            legal_moves = list(board.legal_moves)
-            is_legal = move in legal_moves
-            print(f"Move {move} is {'legal' if is_legal else 'ILLEGAL'}!")
-            print(f"Number of legal moves: {len(legal_moves)}")
-            
-            if is_legal:
-                print(f"Applying AI move: {move}")
-                board.push(move)
-                print(f"AI moved: {move}")
-                print("Board FEN after AI move:", board.fen())
-                
-                if not list(board.legal_moves):
-                    game_over = True
-                    winner_color = board.turn
-                    print("No legal moves available for opponent; ending game.")
-                
-                if board.is_variant_end():
-                    game_over = True
-                    winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                    print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins!")
-                
-                ai_move_cooldown = FPS // 2
-            else:
-                # Move is not legal - debug why
-                print(f"AI ERROR: Move {move} is not legal!")
-                
-                # Check active drawback
-                active_drawback = board.get_active_drawback(board.turn)
-                print(f"Active drawback: {active_drawback}")
-                
-                # Get a sample of actually legal moves
-                legal_moves = list(board.legal_moves)
-                print(f"There are {len(legal_moves)} legal moves. Examples:")
-                for i, legal_move in enumerate(legal_moves[:5]):
-                    print(f"  {i+1}. {legal_move.uci()}")
-                
-                # Test the drawback function directly
-                try:
-                    # Get the drawback function
-                    from GameState.drawback_manager import get_drawback_function
-                    
-                    if active_drawback:
-                        check_func = get_drawback_function(active_drawback)
-                        
-                        # Print function signature to debug parameter order
-                        import inspect
-                        sig = inspect.signature(check_func)
-                        print(f"Drawback function signature: {sig}")
-                        
-                        # Test with both parameter orders to diagnose the issue
-                        test1 = check_func(board, move, board.turn)
-                        test2 = check_func(board, board.turn, move)
-                        print(f"Function returns: {test1} with (board, move, color)")
-                        print(f"Function returns: {test2} with (board, color, move)")
-                    
-                except Exception as e:
-                    import traceback
-                    print(f"Error analyzing drawback: {e}")
-                    traceback.print_exc()
-                
-                # Fall back to random move
-                if legal_moves:
-                    move = random.choice(legal_moves)
-                    print(f"Selecting random fallback move: {move}")
-                    board.push(move)
-                
-        else:
-            print("AI move invalid.")
-        
-        # Reset search state for next turn
-        search_in_progress = False
-        reset_search()
-    else:
-        # Print a status update occasionally to confirm search is still active
-        if random.random() < 0.05:  # ~5% chance each frame to avoid spamming
-            progress = get_progress()
-            print(f"AI is still thinking: {progress}")
+        # Apply the chosen move
+        try:
+            board.push(move)
+            print(f"Move applied: {move}")
+            # Set cooldown to prevent AI from moving again immediately
+            ai_move_cooldown = AI_MOVE_COOLDOWN
+        except Exception as e:
+            print(f"Error applying move: {str(e)}")
 
 def undo_last_move(board):
     """Safely undo the last move on the board and update game state"""
