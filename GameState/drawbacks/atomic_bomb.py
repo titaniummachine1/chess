@@ -93,7 +93,6 @@ def check_explosion_loss(board, color):
     # If the file and rank differences are at most 1, they're adjacent
     if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
         if king_square != last_capture_square:  # Make sure we're not checking the king's own square
-            print(f"ATOMIC BOMB TRIGGERED! Capture at {chess.square_name(last_capture_square)} adjacent to king at {chess.square_name(king_square)}")
             return True  # Loss condition triggered
     
     return False

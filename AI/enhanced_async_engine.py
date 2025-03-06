@@ -45,7 +45,7 @@ def run_search(board, depth, time_limit=5):
     
     Args:
         board: Chess board position
-        depth: Search depth
+        depth: Search depth (passed directly to AI)
         time_limit: Time limit in seconds (used exactly as provided)
         
     Returns:
@@ -85,9 +85,10 @@ def run_search(board, depth, time_limit=5):
         print("No legal moves available - game should be over")
         return None
     
-    # Store book moves to influence search, but DON'T immediately return one
-    book_move = None
+    # Find book moves to guide search, but NEVER play them directly
     book_move_bonuses = {}
+    found_book_move = None
+    
     try:
         from AI.book_handler import BookMoveSelector
         book_selector = BookMoveSelector()
@@ -95,36 +96,43 @@ def run_search(board, depth, time_limit=5):
         
         if book_move_result and book_move_result[0]:
             book_move = book_move_result[0]
+            found_book_move = book_move  # Save for potential tiebreaker
             book_info = book_move_result[1]
-            book_move_bonuses = book_info.get("book_move_bonuses", {})
+            
+            # Get the book move bonuses - these are stored with Move objects as keys
+            raw_bonuses = book_info.get("book_move_bonuses", {})
+            
+            # Convert to a dictionary with UCI strings as keys for safer comparison
+            for move, bonus in raw_bonuses.items():
+                if isinstance(move, chess.Move):
+                    book_move_bonuses[move.uci()] = bonus
+                else:
+                    book_move_bonuses[str(move)] = bonus
+                    
             if book_move in legal_moves:
-                print(f"Found book move: {book_move} (will consider during search)")
+                print(f"Found book move: {book_move} (will use to guide search)")
     except Exception as e:
         print(f"Book move selection failed: {e}")
     
-    # Use the exact time limit as provided, without adjustments
+    # Pass the exact time limit and depth to the engine without further adjustments
+    # Let the DrawbackBot handle iterative deepening internally
     print(f"Using exact time limit: {time_limit}s")
     
-    # Minimum thinking time (to avoid instant moves)
-    min_think_time = 0.5
-    
-    # Call the unified engine to get best move
+    # Call the engine to get best move
     result = select_best_move(board_copy, depth, time_limit, book_move_bonuses)
     
     # Log search statistics
     elapsed = time.time() - start_time
     print(f"Search completed in {elapsed:.2f}s, found move: {result.move}")
     
-    # Ensure minimum thinking time for visual feedback
-    # At least 0.5 second of "thinking"
-    if elapsed < min_think_time:
-        time.sleep(min_think_time - elapsed)
+    # In case of a fairly even evaluation and we found a book move, consider using it
+    if result.move and found_book_move and abs(result.score) < 20:
+        # If search result is very close to neutral, use book move as tiebreaker
+        if found_book_move in legal_moves:
+            print(f"Evaluation close to neutral, using book move as tiebreaker: {found_book_move}")
+            return found_book_move
     
-    # If we have a book move and haven't found a better one, use it
-    if book_move and (result.move is None or result.score < 50):
-        print(f"Using book move as final choice: {book_move}")
-        return book_move
-        
+    # Return the search result, normally never use book moves directly
     return result.move
 
 async def async_search(board, depth, time_limit=5):

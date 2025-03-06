@@ -4,9 +4,9 @@ Global variables used across the application
 
 # Game Settings
 FPS = 60
-AI_DEPTH = 7
 WHITE_AI = True
 BLACK_AI = True
+AI_DEPTH = 7
 TIME_LIMIT = 10  # Default AI time limit in seconds
 
 # Game State Globals

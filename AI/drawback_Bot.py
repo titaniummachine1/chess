@@ -29,9 +29,10 @@ class DrawbackBot:
         self.nodes = 0
         self.tt = {}  # Transposition table
         self.history = {}  # Move history heuristic
-        self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Killer moves
+        self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Killer moves - stores UCI strings, not Move objects
         self.eval_cache = {}  # Cache for position evaluations
-        self.book_move_bonuses = {}  # Book move bonuses in centipawns
+        self.book_move_bonuses = {}  # Book move bonuses in centipawns (uses UCI strings as keys)
+        self.depth = 0  # Current search depth - will be updated during search
         
     def evaluate_position(self, board, drawbacks=None):
         """Enhanced evaluation function that considers drawbacks"""
@@ -124,7 +125,7 @@ class DrawbackBot:
         # Reset cached data for new search
         self.tt = {}
         self.history = {}
-        self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
+        self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Reset killers for all depths
         self.eval_cache = {}
         
         # Starting values for search
@@ -132,102 +133,152 @@ class DrawbackBot:
         best_score = -MATE_UPPER
         start_overall = time.time()
         
-        # Set depth attribute for killer moves indexing in move_value
-        self.depth = depth
+        # Set initial depth attribute for move_value function
+        self.depth = 0  # Start at 0, will be updated in the loop
         
         # Ensure we have a reasonable time limit
         if time_limit is None or time_limit <= 0:
             time_limit = 5.0  # Default to 5 seconds
         
-        # Calculate time per depth to ensure we don't exceed the time limit
-        time_per_depth = time_limit / (depth + 1)  # Reserve some time for overhead
+        print(f"Starting iterative deepening search with max depth {depth} and time limit {time_limit}s")
         
-        for current_depth in range(1, depth + 1):
-            start_time = time.time()
-            
-            # Check if we've already exceeded the time limit
-            elapsed_overall = time.time() - start_overall
-            if elapsed_overall > time_limit * 0.8:  # Use 80% of time limit as cutoff
-                print(f"Time limit approaching after depth {current_depth-1}, stopping search")
-                break
+        try:
+            for current_depth in range(1, depth + 1):
+                # Update depth attribute for killer moves in move_value
+                self.depth = current_depth
                 
-            # Calculate remaining time for this depth
-            remaining_time = max(0.1, time_limit - elapsed_overall)
-            
-            # Use aspiration windows for deeper searches
-            if current_depth >= 3:
-                # Start with previous best score plus a small window
-                alpha = max(-MATE_UPPER, best_score - 50)
-                beta = min(MATE_UPPER, best_score + 50)
+                start_time = time.time()
                 
-                # First attempt with narrow window
-                try:
-                    score = negamax(self, board, current_depth, alpha, beta, start_time=start_overall, time_limit=remaining_time)
+                # More generous time allocation - allow using up to 95% of time limit
+                elapsed_overall = time.time() - start_overall
+                if elapsed_overall > time_limit * 0.95:  # Use 95% of time limit as cutoff
+                    print(f"Time limit approaching after depth {current_depth-1}, stopping search")
+                    break
                     
-                    # If score outside window, re-search with full window
-                    if score <= alpha or score >= beta:
-                        # Check time limit again before researching
-                        if time.time() - start_overall > time_limit * 0.9:
-                            print(f"Time limit nearly reached during aspiration window retry at depth {current_depth}")
+                # Calculate remaining time for this depth - allow more time for deeper depths
+                # Give at least 25% of remaining time to the current depth
+                remaining_time = max(0.2, time_limit - elapsed_overall)
+                time_for_depth = max(remaining_time * 0.25, 0.2)
+                
+                # Use aspiration windows for deeper searches
+                if current_depth >= 3:
+                    # Start with previous best score plus a small window
+                    alpha = max(-MATE_UPPER, best_score - 50)
+                    beta = min(MATE_UPPER, best_score + 50)
+                    
+                    # First attempt with narrow window
+                    try:
+                        score = negamax(self, board, current_depth, alpha, beta, start_time=start_overall, time_limit=time_limit)
+                        
+                        # If score outside window, re-search with full window
+                        if score <= alpha or score >= beta:
+                            # Check time limit again before researching
+                            if time.time() - start_overall > time_limit * 0.98:
+                                print(f"Time limit nearly reached during aspiration window retry at depth {current_depth}")
+                                break
+                                
+                            alpha = -MATE_UPPER
+                            beta = MATE_UPPER
+                            score = negamax(self, board, current_depth, alpha, beta, start_time=start_overall, time_limit=time_limit)
+                    except TimeoutError:
+                        print(f"Search timed out at depth {current_depth}")
+                        break
+                    except Exception as e:
+                        print(f"Error in search at depth {current_depth}: {e}")
+                        # If an error occurs, use previous best move/score and continue
+                        continue
+                else:
+                    # Full window for shallow searches
+                    try:
+                        score = negamax(self, board, current_depth, -MATE_UPPER, MATE_UPPER, start_time=start_overall, time_limit=time_limit)
+                    except TimeoutError:
+                        print(f"Search timed out at depth {current_depth}")
+                        break
+                    except Exception as e:
+                        print(f"Error in search at depth {current_depth}: {e}")
+                        # If an error occurs, use previous best move/score and continue
+                        continue
+                
+                search_time = time.time() - start_time
+                
+                # Find best move from tt
+                key = board.zobrist_hash() if hasattr(board, 'zobrist_hash') else str(board.fen())
+                
+                # Check if we have a move in the transposition table
+                best_tt_move = None
+                if key in self.tt and self.tt[key].move:
+                    tt_move_uci = self.tt[key].move  # This is now a UCI string
+                    
+                    # Convert the UCI string back to a Move object
+                    for legal_move in board.legal_moves:
+                        if legal_move.uci() == tt_move_uci:
+                            best_tt_move = legal_move
                             break
                             
-                        alpha = -MATE_UPPER
-                        beta = MATE_UPPER
-                        score = negamax(self, board, current_depth, alpha, beta, start_time=start_overall, time_limit=remaining_time)
-                except TimeoutError:
-                    print(f"Search timed out at depth {current_depth}")
-                    break
-            else:
-                # Full window for shallow searches
-                try:
-                    score = negamax(self, board, current_depth, -MATE_UPPER, MATE_UPPER, start_time=start_overall, time_limit=remaining_time)
-                except TimeoutError:
-                    print(f"Search timed out at depth {current_depth}")
-                    break
-            
-            search_time = time.time() - start_time
-            
-            # Find best move from tt
-            key = board.zobrist_hash() if hasattr(board, 'zobrist_hash') else str(board.fen())
-            if key in self.tt and self.tt[key].move:
-                best_move = self.tt[key].move
-                best_score = score
-                
-                # Report search results with clearer information
-                print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {best_move.uci()}, Time: {search_time:.2f}s")
-                
-                # Early exit if we found a forced mate
-                if score > MATE_LOWER or score < -MATE_LOWER:
-                    print(f"Found mate in {(MATE_UPPER - abs(score)) // 2} moves, stopping search")
-                    break
+                    best_move = best_tt_move
+                    best_score = score
                     
-                # Check time after completing a depth
-                if time.time() - start_overall > time_limit * 0.9:
-                    print(f"Time limit nearly reached after completing depth {current_depth}")
-                    break
-            else:
-                # If no move found in TT, report this but continue
-                print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: None, Time: {search_time:.2f}s")
-                
-                # Try to extract a move from legal moves if none found
-                if best_move is None and current_depth > 1:
-                    # Use the best move from previous depth if available
-                    for prev_key, entry in self.tt.items():
-                        if entry.move:
-                            best_move = entry.move
-                            best_score = score
-                            print(f"Using move from previous depth: {best_move.uci()}")
-                            break
+                    # Report search results with clearer information
+                    print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {tt_move_uci}, Time: {search_time:.2f}s")
+                    
+                    # Early exit if we found a forced mate
+                    if score > MATE_LOWER or score < -MATE_LOWER:
+                        print(f"Found mate in {(MATE_UPPER - abs(score)) // 2} moves, stopping search")
+                        break
+                        
+                    # Check time after completing a depth - use nearly full allocation of time
+                    if time.time() - start_overall > time_limit * 0.98:
+                        print(f"Time limit nearly reached after completing depth {current_depth}")
+                        break
+                else:
+                    # If no move found in TT, report this but continue
+                    print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: None, Time: {search_time:.2f}s")
+                    
+                    # Try to extract a move from previous depths
+                    if best_move is None and current_depth > 1:
+                        for prev_key, entry in self.tt.items():
+                            if entry.move:
+                                # Convert UCI string to Move object
+                                entry_move_uci = entry.move
+                                for legal_move in board.legal_moves:
+                                    if legal_move.uci() == entry_move_uci:
+                                        best_move = legal_move
+                                        best_score = entry.value
+                                        print(f"Using move from previous depth: {entry_move_uci}")
+                                        break
+                                if best_move:  # Break outer loop if move found
+                                    break
+        except Exception as e:
+            print(f"Fatal error in search: {e}")
+            import traceback
+            traceback.print_exc()
         
-        # If we still don't have a move, try to get one from the first depth
+        # Reset depth attribute to avoid confusing future searches
+        self.depth = 0
+        
+        # If we still don't have a move, try to get one from the transposition table
         if best_move is None:
             # Look for any move in the transposition table
             for key, entry in self.tt.items():
                 if entry.move:
-                    best_move = entry.move
-                    best_score = entry.value
-                    print(f"Using fallback move from transposition table: {best_move.uci()}")
-                    break
+                    # Convert UCI string to Move object
+                    entry_move_uci = entry.move
+                    for legal_move in board.legal_moves:
+                        if legal_move.uci() == entry_move_uci:
+                            best_move = legal_move
+                            best_score = entry.value
+                            print(f"Using fallback move from transposition table: {entry_move_uci}")
+                            break
+                    if best_move:  # Break outer loop if move found
+                        break
+        
+        # If still no move found from transposition table, pick the first legal move
+        if best_move is None:
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                best_move = legal_moves[0]
+                best_score = 0  # Neutral score for fallback move
+                print(f"No move found in search, using first legal move: {best_move.uci()}")
         
         # Report final search results
         elapsed_total = time.time() - start_overall
@@ -254,7 +305,10 @@ class DrawbackBot:
         return False
         
     def get_book_move(self, board):
-        """Get a move from the opening book if available, considering drawbacks"""
+        """
+        Get a move from the opening book if available, considering drawbacks.
+        This is used only to guide search, not to directly play moves.
+        """
         try:
             from AI.book_handler import BookMoveSelector
             
@@ -274,17 +328,29 @@ class DrawbackBot:
                     info = book_move_result[1] if len(book_move_result) > 1 else None
                     
                     # Store the move bonuses for search if we need to fall back
+                    # But convert Move objects to UCI strings
                     if info and "book_move_bonuses" in info:
-                        self.book_move_bonuses = info["book_move_bonuses"]
+                        # Convert Move objects to UCI strings for the book_move_bonuses
+                        self.book_move_bonuses = {}
+                        for bmove, bonus in info["book_move_bonuses"].items():
+                            self.book_move_bonuses[bmove.uci()] = bonus
                         
-                    print(f"Drawback-adjusted book move found: {move}")
+                    print(f"Found drawback-adjusted book move: {move.uci()} (will use to guide search)")
                     return move
             
             # If no drawback or no weighted move found, fall back to standard book move
             book_move_result = book_selector.get_weighted_book_move(board)
             if book_move_result and book_move_result[0]:
                 move = book_move_result[0]
-                print(f"Standard book move found: {move}")
+                info = book_move_result[1] if len(book_move_result) > 1 else None
+                
+                # Store the move bonuses for search as UCI strings
+                if info and "book_move_bonuses" in info:
+                    self.book_move_bonuses = {}
+                    for bmove, bonus in info["book_move_bonuses"].items():
+                        self.book_move_bonuses[bmove.uci()] = bonus
+                    
+                print(f"Found standard book move: {move.uci()} (will use to guide search)")
                 return move
             
         except ImportError:
@@ -304,18 +370,20 @@ class DrawbackBot:
         # Get active drawback
         active_drawback = board.get_active_drawback(board.turn)
         
-        # Then try book move with drawback consideration
+        # Find book moves to guide search, but never play them directly
         book_move = None
         if use_book:
             book_move = self.get_book_move(board)
             if book_move:
-                # Double check that the book move complies with drawback restrictions
-                if not active_drawback or not board._is_drawback_illegal(book_move, board.turn):
-                    print(f"Found book move: {book_move.uci()} (will verify with search)")
-                    # Don't immediately return the book move - let the search confirm it
-                else:
-                    print(f"Book move {book_move} rejected due to drawback: {active_drawback}")
+                # Check that the book move complies with drawback restrictions
+                if active_drawback and board._is_drawback_illegal(book_move, board.turn):
+                    print(f"Book move {book_move.uci()} incompatible with drawback: {active_drawback}")
                     book_move = None
+                    # Clear book move bonuses
+                    self.book_move_bonuses = {}
+                else:
+                    # Don't return book move - just save it to guide search
+                    print(f"Book move will guide search but not be played directly")
                 
         # Mark the board for search
         if hasattr(board, "_in_search"):
@@ -331,18 +399,12 @@ class DrawbackBot:
         search_depth = max(1, depth)
         print(f"Starting search at depth {search_depth}")
         
-        # Perform the search
+        # Always perform the search, even with book moves
         score, move = self.search(board, search_depth)
         
         # Reset search flag
         if hasattr(board, "_in_search"):
             board._in_search = False
-            
-        # If we have a book move and the search didn't find anything better,
-        # or the search move is significantly worse, use the book move
-        if book_move and (move is None or score < -100):
-            print(f"Using book move instead of search result: {book_move.uci()}")
-            return book_move
             
         # If no move was found, find a legal move
         if not move:

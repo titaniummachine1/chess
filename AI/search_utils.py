@@ -17,13 +17,17 @@ class Entry:
         value: The score for this position
         depth: The depth of the search that produced this score
         flag: The type of node ('exact', 'lower', 'upper')
-        move: The best move found for this position
+        move: The best move found for this position (stored as UCI string)
     """
     def __init__(self, value, depth, flag, move=None):
         self.value = value
         self.depth = depth
         self.flag = flag  # 'exact', 'lower', or 'upper'
-        self.move = move
+        # Store move as UCI string if it's a Move object
+        if move is not None and hasattr(move, 'uci'):
+            self.move = move.uci()
+        else:
+            self.move = move
 
 def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
     """
@@ -89,8 +93,8 @@ def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
                 
             tactical_moves.append((score, move))
     
-    # Sort moves by score in descending order
-    tactical_moves.sort(reverse=True)
+    # Sort moves by score in descending order - avoid comparing Move objects directly
+    tactical_moves.sort(key=lambda x: x[0], reverse=True)
     
     # Search tactical moves
     for _, move in tactical_moves:
@@ -121,10 +125,11 @@ def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
                 return beta
             if score > alpha:
                 alpha = score
-        except Exception:
+        except Exception as e:
             # If move causes an error, pop it and continue
             if board.move_stack and board.move_stack[-1] == move:
                 board.pop()
+            print(f"Error in quiescence search: {str(e)}")
             continue  # Skip problematic moves
     
     return alpha
@@ -148,13 +153,19 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
     Returns:
         The evaluated score for the position
     """
+    # Only check time limit at the beginning of a search path
+    # This avoids excessive checking that slows down the search
+    if start_time is not None and time_limit is not None:
+        # At root node (depth >= 5), check time every node
+        # At deeper nodes, check less frequently to improve performance
+        if depth >= 5 or bot.nodes % (1000 * (1 + max(0, 5 - depth))) == 0:
+            elapsed = time.time() - start_time
+            if elapsed >= time_limit * 0.95:  # Allow using 95% of time limit
+                raise TimeoutError("Search time limit reached")
+        
     # Store original alpha value for transposition table flag
     alpha_orig = alpha
     
-    # Check time limit if provided
-    if start_time and time_limit and time.time() - start_time > time_limit:
-        raise TimeoutError("Search time limit reached")
-        
     # Get position key for transposition table lookup
     key = board.zobrist_hash() if hasattr(board, 'zobrist_hash') else str(board.fen())
     
@@ -189,21 +200,86 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
             return -MATE_UPPER + bot.nodes
         return 0  # Draw
     
-    # Generate and score moves
-    moves = list(board.legal_moves)
+    # Generate legal moves
+    legal_moves = list(board.legal_moves)
     
     # No legal moves - it's a draw/stalemate
-    if not moves:
+    if not legal_moves:
         return 0  # Draw score
     
-    # Score and sort moves for better pruning
+    # Get the current killer moves for this depth (as UCI strings)
+    killer_move_ucis = []
+    if hasattr(bot, 'killers') and hasattr(bot, 'depth') and bot.depth < len(bot.killers):
+        for killer in bot.killers[bot.depth]:
+            if killer is not None:
+                if isinstance(killer, chess.Move):
+                    killer_move_ucis.append(killer.uci())
+                else:
+                    killer_move_ucis.append(killer)
+    
+    # Get transposition table move if available (as UCI)
+    tt_move_uci = None
+    if key in bot.tt and bot.tt[key].move:
+        tt_move_uci = bot.tt[key].move  # Already stored as UCI
+    
+    # Score moves without any direct comparisons of Move objects
     scored_moves = []
-    for move in moves:
-        score = move_value(bot, board, move, key)
+    
+    for move in legal_moves:
+        # Calculate a score for move ordering
+        score = 0
+        move_uci = move.uci()
+        
+        # Highest priority for transposition table moves
+        if tt_move_uci and move_uci == tt_move_uci:
+            score = 10000000
+        # High priority for killer moves (good quiet moves found during search)
+        elif move_uci in killer_move_ucis:
+            score = 9000000 - killer_move_ucis.index(move_uci) * 100000
+        # Captures are sorted by MVV-LVA
+        elif board.is_capture(move):
+            victim = board.piece_at(move.to_square)
+            aggressor = board.piece_at(move.from_square)
+            
+            if victim and aggressor:
+                victim_symbol = victim.symbol().upper()
+                aggressor_symbol = aggressor.symbol().upper()
+                
+                # Get piece values
+                victim_value = PIECE_VALUES.get(victim_symbol, (100, 0))[0]
+                aggressor_value = PIECE_VALUES.get(aggressor_symbol, (100, 0))[0]
+                
+                # King captures are highest priority
+                if victim.piece_type == chess.KING:
+                    score = 9500000
+                else:
+                    # MVV-LVA formula: victim value - attacker value / 10
+                    score = 8000000 + (victim_value * 100 - aggressor_value)
+        # Promotions are high priority
+        elif move.promotion:
+            promotion_value = {
+                chess.QUEEN: 800,
+                chess.ROOK: 500,
+                chess.BISHOP: 320,
+                chess.KNIGHT: 300
+            }
+            score = 7000000 + promotion_value.get(move.promotion, 0)
+        # History heuristic for quiet moves
+        else:
+            history_score = bot.history.get((move.from_square, move.to_square), 0)
+            score = history_score
+            
+        # Book moves - small bonus to guide search, not enough to dominate
+        if hasattr(bot, 'book_move_bonuses') and bot.book_move_bonuses:
+            if move_uci in bot.book_move_bonuses:
+                # Apply the bonus directly
+                score += bot.book_move_bonuses[move_uci] * 50
+        
+        # Add the scored move to our list
         scored_moves.append((score, move))
     
-    # Sort by score (highest first)
-    scored_moves.sort(reverse=True)
+    # Sort by score (highest first) using key function to avoid direct Move comparisons
+    scored_moves.sort(key=lambda x: x[0], reverse=True)
     
     # Initialize variables for storing the best move
     best_value = -MATE_UPPER
@@ -211,6 +287,14 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
     
     # Search through moves
     for i, (score, move) in enumerate(scored_moves):
+        # At regular intervals, check if we're out of time
+        if start_time and time_limit and i > 0 and i % 5 == 0:
+            elapsed = time.time() - start_time
+            if elapsed >= time_limit * 0.95:
+                if best_move:
+                    bot.tt[key] = Entry(best_value, depth, 'exact', best_move)
+                raise TimeoutError("Search time limit exceeded")
+                
         # Try the move
         board.push(move)
         
@@ -241,15 +325,20 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                 if value > alpha:
                     alpha = value
                     
-                    # Store move in transposition table
+                    # Store move in transposition table (Entry class will convert to UCI)
                     bot.tt[key] = Entry(value, depth, 'exact', move)
                     
                     # Beta cutoff
                     if alpha >= beta:
-                        # Store killer move
+                        # Store killer move as UCI string, not Move object
                         if not board.is_capture(move):
-                            bot.killers[depth][1] = bot.killers[depth][0]
-                            bot.killers[depth][0] = move
+                            if hasattr(bot, 'killers') and hasattr(bot, 'depth') and bot.depth < len(bot.killers):
+                                # Make sure we're using proper array indices
+                                if len(bot.killers[bot.depth]) > 1:
+                                    # Store the UCI string, not the move object
+                                    move_uci = move.uci()
+                                    bot.killers[bot.depth][1] = bot.killers[bot.depth][0]
+                                    bot.killers[bot.depth][0] = move_uci
                             
                         # Store move ordering info
                         if not board.is_capture(move):
@@ -267,6 +356,7 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         except Exception as e:
             board.pop()
             # Just continue with next move
+            print(f"Error in search: {str(e)}")
             continue
             
     # If no move improved alpha, store the position as an upper bound
@@ -280,74 +370,3 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         bot.tt[key] = Entry(best_value, depth, 'exact', best_move)
     
     return best_value 
-
-def move_value(bot, board, move, key):
-    """
-    Score a move for move ordering in negamax search
-    
-    Parameters:
-        bot: The bot instance containing history and killer move tables
-        board: The current chess board
-        move: The move to score
-        key: The position hash key
-        
-    Returns:
-        A numeric score for the move (higher is better)
-    """
-    # Check if this is a TT move (highest priority)
-    if key in bot.tt and bot.tt[key].move == move:
-        return 10000000
-    
-    # Killer moves (good non-captures found during search)
-    if move in bot.killers[bot.depth]:
-        return 9000000
-    
-    # Captures are sorted by MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
-    if board.is_capture(move):
-        victim = board.piece_at(move.to_square)
-        aggressor = board.piece_at(move.from_square)
-        
-        if victim and aggressor:
-            victim_symbol = victim.symbol().upper()
-            aggressor_symbol = aggressor.symbol().upper()
-            
-            # Get piece values
-            victim_value = PIECE_VALUES.get(victim_symbol, (100, 0))[0]
-            aggressor_value = PIECE_VALUES.get(aggressor_symbol, (100, 0))[0]
-            
-            # King captures are highest priority
-            if victim.piece_type == chess.KING:
-                return 9500000
-                
-            # MVV-LVA formula: victim value - attacker value / 10
-            # This prioritizes capturing valuable pieces with less valuable attackers
-            return 8000000 + (victim_value * 100 - aggressor_value)
-    
-    # Promotions are high priority
-    if move.promotion:
-        promotion_value = {
-            chess.QUEEN: 800,
-            chess.ROOK: 500,
-            chess.BISHOP: 320,
-            chess.KNIGHT: 300
-        }
-        return 7000000 + promotion_value.get(move.promotion, 0)
-    
-    # History heuristic for quiet moves
-    history_score = bot.history.get((move.from_square, move.to_square), 0)
-    
-    # Book moves
-    book_bonus = 0
-    if hasattr(bot, 'book_move_bonuses') and bot.book_move_bonuses and move in bot.book_move_bonuses:
-        book_bonus = bot.book_move_bonuses[move] * 10000  # Scale up book bonus
-    
-    # Center control for pawns
-    center_bonus = 0
-    if board.piece_at(move.from_square) and board.piece_at(move.from_square).piece_type == chess.PAWN:
-        to_file, to_rank = chess.square_file(move.to_square), chess.square_rank(move.to_square)
-        # Center files (c, d, e, f)
-        if 2 <= to_file <= 5:
-            # Center ranks (3, 4, 5, 6) - higher for advanced ranks
-            center_bonus = (to_rank - 1) * 10 if board.turn == chess.WHITE else (8 - to_rank) * 10
-    
-    return history_score + book_bonus + center_bonus 

@@ -40,10 +40,19 @@ class BookMoveSelector:
             active_drawback = board.get_active_drawback(board.turn)
             
         # Filter legal moves considering drawbacks
+        legal_moves = list(board.legal_moves)
+        legal_move_ucis = [move.uci() for move in legal_moves]
+        
+        # Convert book moves to UCI strings where needed
         legal_book_moves = []
         for move, freq in book_moves:
-            if move in board.legal_moves:
-                legal_book_moves.append((move, freq))
+            move_uci = move.uci() if hasattr(move, 'uci') else str(move)
+            if move_uci in legal_move_ucis:
+                # Find the actual move object with matching UCI
+                for legal_move in legal_moves:
+                    if legal_move.uci() == move_uci:
+                        legal_book_moves.append((legal_move, freq))
+                        break
             
         if not legal_book_moves:
             return None, {"book_move_bonuses": {}, "special_move": None}
@@ -54,11 +63,12 @@ class BookMoveSelector:
         # Select the best move (highest frequency) as the primary choice
         best_move = sorted_moves[0][0]
         
-        # Create book move bonuses dictionary - give small bonuses proportional to move frequency
+        # Create book move bonuses dictionary with UCI strings as keys
         book_move_bonuses = {}
         total_freq = sum(freq for _, freq in sorted_moves)
         
         for move, freq in sorted_moves:
+            move_uci = move.uci()
             # Calculate bonus as percentage of move frequency compared to total
             # Higher frequency moves get larger bonuses, capped at 30 centipawns
             if total_freq > 0:
@@ -66,11 +76,13 @@ class BookMoveSelector:
             else:
                 bonus = 5  # Default small bonus
             
-            book_move_bonuses[move] = bonus
+            # Store the UCI string with the bonus value
+            book_move_bonuses[move_uci] = bonus
         
         # Provide a modest bonus (20cp) to the best move
         special_move = best_move
-        book_move_bonuses[special_move] = max(20, book_move_bonuses.get(special_move, 0))
+        special_move_uci = special_move.uci()
+        book_move_bonuses[special_move_uci] = max(20, book_move_bonuses.get(special_move_uci, 0))
         
         # Return the best move and additional info
         return best_move, {
