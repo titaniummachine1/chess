@@ -420,8 +420,54 @@ def handle_ai_turn(board):
                 
                 # Apply the move
                 try:
-                    board.push(move)
-                    print(f"Move applied after timeout: {move}")
+                    # Process the move based on its format
+                    move_obj = None
+                    
+                    if isinstance(move, dict) and 'move' in move:
+                        # Convert UCI string to Move object
+                        move_uci = move['move']
+                        if move_uci:
+                            # Find the matching legal move
+                            for legal_move in board.legal_moves:
+                                if legal_move.uci() == move_uci:
+                                    move_obj = legal_move
+                                    break
+                            if not move_obj:
+                                print(f"Warning: Could not find legal move matching {move_uci}")
+                                
+                    elif isinstance(move, dict) and 'error' in move and move['error'] == 'timeout':
+                        # Handle timeout error - try to use last known best move from drawback_Bot
+                        try:
+                            from AI.drawback_Bot import current_best_move
+                            if current_best_move:
+                                move_uci = current_best_move.uci()
+                                # Find the matching legal move
+                                for legal_move in board.legal_moves:
+                                    if legal_move.uci() == move_uci:
+                                        move_obj = legal_move
+                                        break
+                                print(f"Using last known best move from timeout: {move_obj}")
+                        except (ImportError, AttributeError):
+                            pass
+                    else:
+                        # Move is already a Move object
+                        move_obj = move
+                    
+                    # If we still don't have a move, use first legal move
+                    if not move_obj:
+                        legal_moves = list(board.legal_moves)
+                        if legal_moves:
+                            move_obj = legal_moves[0]
+                            print(f"Using fallback first legal move: {move_obj}")
+                        else:
+                            print("No legal moves available - game should be over")
+                            game_over = True
+                            winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
+                            return
+                    
+                    # Now apply the move
+                    board.push(move_obj)
+                    print(f"Move applied after timeout: {move_obj}")
                     
                     # Check for game end conditions
                     game_over, winner_color, end_message = check_game_end_conditions(board)

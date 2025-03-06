@@ -274,6 +274,33 @@ def get_result():
                     'note': 'immediate_win'
                 }
         
+        # Try to get the current best move from the search before cancelling
+        try:
+            from AI.drawback_Bot import current_best_move
+            
+            if current_best_move is not None:
+                move_str = current_best_move.uci() if current_best_move else None
+                if move_str:
+                    print(f"Using best move found before timeout: {move_str}")
+                    elapsed = time.time() - engine_state.start_time
+                    
+                    # Try to cancel the search
+                    if not engine_state.current_search.done():
+                        engine_state.current_search.cancel()
+                        
+                    # Reset the engine state
+                    engine_state.reset()
+                    
+                    return {
+                        'move': move_str,
+                        'time': elapsed,
+                        'depth': engine_state.depth,
+                        'note': 'timeout_best_move'
+                    }
+        except (ImportError, AttributeError):
+            # If we can't access the current best move, continue with timeout
+            pass
+        
         # Try to cancel the search
         if not engine_state.current_search.done():
             engine_state.current_search.cancel()
