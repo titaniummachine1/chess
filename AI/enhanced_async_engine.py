@@ -13,7 +13,7 @@ from functools import partial
 import chess
 
 # Import engine components
-from AI.engine_core import select_best_move
+from AI.engine_core import select_best_move, find_immediate_win
 
 # Global state for async search
 class AsyncEngineState:
@@ -27,6 +27,7 @@ class AsyncEngineState:
         self.time_limit = 0
         self.last_best_move = None  # Track the last best move for comparison
         self.current_best_move = None  # Current best move
+        self.board = None  # Added to store the board
         
     def reset(self):
         """Reset the engine state completely"""
@@ -37,6 +38,7 @@ class AsyncEngineState:
         self.time_limit = 0
         self.last_best_move = None
         self.current_best_move = None
+        self.board = None
 
 # Create a singleton instance
 engine_state = AsyncEngineState()
@@ -91,6 +93,7 @@ async def async_search(board, depth, time_limit=5, smart_time_management=False):
     engine_state.time_limit = time_limit
     engine_state.last_best_move = None
     engine_state.current_best_move = None
+    engine_state.board = board
     
     # Create a partial function with the search parameters
     search_func = partial(run_search, 
@@ -221,6 +224,20 @@ def get_result():
         engine_state.start_time and 
         engine_state.time_limit > 0 and
         time.time() - engine_state.start_time >= engine_state.time_limit):
+        
+        # Before forcing termination, check if there are any obvious winning moves
+        # This helps avoid overlooking critical moves due to timeouts
+        if engine_state.board is not None:
+            winning_move = find_immediate_win(engine_state.board)
+            if winning_move:
+                print(f"Found immediate winning move before timeout: {winning_move.uci()}")
+                elapsed = time.time() - engine_state.start_time
+                return {
+                    'move': winning_move.uci(),
+                    'time': elapsed,
+                    'depth': engine_state.depth,
+                    'note': 'immediate_win'
+                }
         
         # Try to cancel the search
         if not engine_state.current_search.done():

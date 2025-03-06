@@ -220,4 +220,58 @@ def evaluate_current_position(board, include_drawback_effects=True):
     else:
         # Use standard evaluation without drawback considerations
         from AI.evaluation import evaluate_position_standard
-        return evaluate_position_standard(board) 
+        return evaluate_position_standard(board)
+
+def find_immediate_win(board):
+    """
+    Checks for any immediate winning moves on the board
+    
+    Args:
+        board: Current position
+        
+    Returns:
+        A winning move if found, otherwise None
+    """
+    # Check each legal move for a direct win
+    for move in board.legal_moves:
+        # 1. Check for king capture (immediate win in Drawback Chess)
+        target = board.piece_at(move.to_square)
+        if target and target.piece_type == chess.KING:
+            return move
+            
+        # 2. Check for atomic bomb win (capture adjacent to opponent's king)
+        if board.is_capture(move):
+            # Check if opponent has atomic bomb drawback
+            opponent_color = not board.turn
+            if hasattr(board, 'get_active_drawback'):
+                active_drawback = board.get_active_drawback(opponent_color)
+                if active_drawback == "atomic_bomb":
+                    # Find opponent's king
+                    king_square = None
+                    for square, piece in board.piece_map().items():
+                        if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                            king_square = square
+                            break
+                            
+                    if king_square is not None:
+                        # Check if capture is adjacent to king
+                        capture_square = move.to_square
+                        king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                        capture_file = chess.square_file(capture_square)
+                        capture_rank = chess.square_rank(capture_square)
+                        
+                        # If they're adjacent (within 1 square in any direction)
+                        if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
+                            if king_square != capture_square:  # Not the king itself
+                                return move
+    
+    # 3. Try any drawback-specific logic for other drawbacks
+    if hasattr(board, 'get_active_drawback'):
+        opponent_color = not board.turn
+        active_drawback = board.get_active_drawback(opponent_color)
+        
+        if active_drawback:
+            # We could add special logic for other drawbacks here
+            pass
+            
+    return None 

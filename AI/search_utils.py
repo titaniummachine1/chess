@@ -291,7 +291,9 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                         # If they're adjacent (within 1 square in any direction)
                         if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
                             if king_square != capture_square:  # Not the king itself
-                                is_drawback_win = True  # This is an atomic bomb win
+                                # This is an atomic bomb win - highest priority
+                                is_drawback_win = True
+                                score = 30000000  # Even higher priority than other wins
         
         board.pop()
         
@@ -376,9 +378,16 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         # This helps optimize drawback checks during search
         if hasattr(board, '_in_search'):
             old_search_flag = board._in_search
-            board._in_search = True
+            board._in_search = False  # Set to FALSE to force drawback checks during search for accurate evaluation
         else:
             old_search_flag = None
+        
+        # Simulate the _last_capture_square tracking that the real board has
+        if hasattr(board, '_last_capture_square') and board.is_capture(move):
+            old_capture_square = board._last_capture_square
+            board._last_capture_square = move.to_square
+        else:
+            old_capture_square = None
         
         # Check for immediate win due to drawback
         win_by_drawback = False
@@ -386,7 +395,30 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
             opponent_color = not board.turn
             active_drawback = board.get_active_drawback(opponent_color)
             
-            if active_drawback and hasattr(board, 'check_drawback_win'):
+            if active_drawback == "atomic_bomb" and board.is_capture(move):
+                # For atomic bomb, we need to check if this capture is adjacent to the opponent's king
+                
+                # Find opponent's king
+                king_square = None
+                for square, piece in board.piece_map().items():
+                    if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                        king_square = square
+                        break
+                
+                if king_square is not None:
+                    # Check if the capture square (move.to_square) is adjacent to the king
+                    capture_square = move.to_square
+                    king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                    capture_file = chess.square_file(capture_square)
+                    capture_rank = chess.square_rank(capture_square)
+                    
+                    # If they're adjacent (within 1 square in any direction)
+                    if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
+                        if king_square != capture_square:  # Not capturing the king itself
+                            win_by_drawback = True
+            
+            # Also try using the drawback loss function to detect other drawback-specific wins
+            elif active_drawback and hasattr(board, 'check_drawback_win'):
                 try:
                     from GameState.drawback_manager import get_drawback_loss_function
                     loss_function = get_drawback_loss_function(active_drawback)
@@ -421,6 +453,8 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         if win_by_drawback:
             if old_search_flag is not None:
                 board._in_search = old_search_flag
+            if old_capture_square is not None and hasattr(board, '_last_capture_square'):
+                board._last_capture_square = old_capture_square
             board.pop()
             return MATE_UPPER - bot.nodes - 1
         
@@ -443,6 +477,10 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
             # Restore search flag
             if old_search_flag is not None:
                 board._in_search = old_search_flag
+                
+            # Restore capture square tracking
+            if old_capture_square is not None and hasattr(board, '_last_capture_square'):
+                board._last_capture_square = old_capture_square
                 
             board.pop()
             
