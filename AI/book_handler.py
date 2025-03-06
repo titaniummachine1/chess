@@ -26,14 +26,10 @@ class BookMoveSelector:
         """
         # Get all book moves for current position
         book_moves = OPENING_BOOK.get_book_moves(board)
-        print(f"BOOK DEBUG: Found {len(book_moves)} book moves for current position")
         
         if not book_moves:
             return None, {"book_move_bonuses": {}, "special_move": None}
             
-        # Print all available book moves with their weights
-        print(f"BOOK DEBUG: Available moves: {', '.join([f'{move}:{weight}' for move, weight in book_moves])}")
-        
         # Force new randomization each time - make sure to seed differently
         import time
         random.seed(time.time() + hash(board.fen()) % 1000)
@@ -48,90 +44,40 @@ class BookMoveSelector:
         for move, freq in book_moves:
             if move in board.legal_moves:
                 legal_book_moves.append((move, freq))
-            else:
-                print(f"BOOK DEBUG: Move {move} is not legal with current drawback")
-        
-        # If no legal book moves remain after filtering
+            
         if not legal_book_moves:
             return None, {"book_move_bonuses": {}, "special_move": None}
-            
-        book_moves = legal_book_moves
         
-        # Calculate move weights based on frequency
-        total_freq = sum(freq for _, freq in book_moves)
-        if total_freq == 0:
-            return None, {"book_move_bonuses": {}, "special_move": None}
-            
-        # Normalize frequencies to get probabilities
-        move_probs = {}
-        for move, freq in book_moves:
-            # Add random variation (+/- 20%) to each probability for more diversity
-            random_factor = 0.8 + 0.4 * random.random()  # 0.8 to 1.2
-            
-            # Reduce probability further if there's an active drawback
-            if active_drawback:
-                # More randomness with drawbacks to avoid predictable patterns
-                drawback_factor = 0.6 + 0.8 * random.random()  # 0.6 to 1.4
-                random_factor *= drawback_factor
-                
-            normalized_prob = ((freq + 1) / (total_freq + len(book_moves))) * random_factor
-            move_probs[move] = normalized_prob
+        # Sort moves by frequency/weight in descending order to prioritize stronger moves
+        sorted_moves = sorted(legal_book_moves, key=lambda x: x[1], reverse=True)
         
-        # Select suggested move weighted by probability
-        moves = list(move_probs.keys())
-        probs = [move_probs[m] for m in moves]
-        total_prob = sum(probs)
-        if total_prob > 0:  # Normalize probabilities
-            probs = [p/total_prob for p in probs]
+        # Select the best move (highest frequency) as the primary choice
+        best_move = sorted_moves[0][0]
         
-        # Select a special move to get extra bonus
-        special_move = None
-        if moves:
-            special_move = random.choices(moves, weights=probs, k=1)[0]
-            print(f"BOOK DEBUG: Special move selected: {special_move} (gets 50cp bonus)")
-            
-        # Prepare bonus values for book moves - scaled by move frequency
+        # Create book move bonuses dictionary - give small bonuses proportional to move frequency
         book_move_bonuses = {}
+        total_freq = sum(freq for _, freq in sorted_moves)
         
-        # First calculate the max frequency to normalize
-        max_freq = max([freq for _, freq in book_moves]) if book_moves else 1
+        for move, freq in sorted_moves:
+            # Calculate bonus as percentage of move frequency compared to total
+            # Higher frequency moves get larger bonuses, capped at 30 centipawns
+            if total_freq > 0:
+                bonus = min(30, int(30 * freq / total_freq))
+            else:
+                bonus = 5  # Default small bonus
+            
+            book_move_bonuses[move] = bonus
         
-        for move, freq in book_moves:
-            # Scale the bonus based on frequency (25-40cp range)
-            # More frequent moves get higher bonuses
-            frequency_ratio = freq / max_freq
-            scaled_bonus = 25 + int(15 * frequency_ratio)
-            book_move_bonuses[move] = scaled_bonus
-            
-        # The special move gets an extra bonus (50cp total)
-        if special_move:
-            book_move_bonuses[special_move] = 50
-            
-        # Top 3 most frequent moves get an additional boost
-        if len(book_moves) > 1:
-            # Sort by frequency
-            sorted_moves = sorted(book_moves, key=lambda x: x[1], reverse=True)
-            # Top move gets +10cp
-            if len(sorted_moves) >= 1:
-                top_move = sorted_moves[0][0]
-                book_move_bonuses[top_move] = book_move_bonuses.get(top_move, 25) + 10
-            # Second move gets +5cp
-            if len(sorted_moves) >= 2:
-                second_move = sorted_moves[1][0]
-                book_move_bonuses[second_move] = book_move_bonuses.get(second_move, 25) + 5
-            
-        # Choose a suggested move based on probabilities
-        suggested_move = None
-        if moves:
-            suggested_move = random.choices(moves, weights=probs, k=1)[0]
+        # Provide a modest bonus (20cp) to the best move
+        special_move = best_move
+        book_move_bonuses[special_move] = max(20, book_move_bonuses.get(special_move, 0))
         
-        result_info = {
+        # Return the best move and additional info
+        return best_move, {
             "book_move_bonuses": book_move_bonuses,
             "special_move": special_move,
-            "all_book_moves": [m for m in moves]
+            "all_book_moves": [move for move, _ in sorted_moves]
         }
-        
-        return suggested_move, result_info
         
     def adjust_piece_square_values(self, board, color, move, pst_values, weights):
         """

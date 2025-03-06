@@ -13,7 +13,7 @@ import random
 # Import engine components
 from AI.drawback_Bot import best_move as bot_best_move
 from AI.ai_utils import get_king_capture_move, MATE_LOWER, MATE_UPPER, MAX_DEPTH
-from AI.book_handler import BookMoveSelector, get_book_move
+from AI.book_handler import BookMoveSelector
 from AI.evaluation import evaluate_position
 from GameState.drawback_manager import get_drawback_loss_function
 
@@ -115,7 +115,7 @@ def check_drawback_loss_conditions(board):
     # No loss conditions detected
     return (False, None, None)
 
-def select_best_move(board, depth=3, time_limit=1.0):
+def select_best_move(board, depth=3, time_limit=1.0, book_move_bonuses=None):
     """
     Enhanced unified function to select the best move in the current position.
     Abstracts the engine complexity and provides cleaner interface.
@@ -124,6 +124,7 @@ def select_best_move(board, depth=3, time_limit=1.0):
         board: Chess board position
         depth: Search depth
         time_limit: Time limit in seconds
+        book_move_bonuses: Dictionary of bonuses for book moves
         
     Returns:
         EngineResult object with move, score, principal variation and stats
@@ -149,33 +150,6 @@ def select_best_move(board, depth=3, time_limit=1.0):
                 time=0.01
             )
     
-    # First try book move
-    try:
-        # Always import inside function to avoid circular imports
-        from AI.book_handler import get_book_move 
-        
-        if hasattr(board_copy, 'get_active_drawback'):
-            active_drawback = board_copy.get_active_drawback(board_copy.turn)
-            print(f"Checking book moves with drawback: {active_drawback}")
-            
-        book_move = get_book_move(board_copy)
-        if book_move:
-            # Make sure book move is legal with current drawbacks
-            if book_move in board_copy.legal_moves:
-                print(f"Using book move: {book_move.uci()}")
-                return EngineResult(
-                    move=book_move,
-                    score=50,  # Modest score for book moves
-                    pv=[book_move.uci()],
-                    nodes=1,
-                    time=0.1
-                )
-            else:
-                print(f"Book move {book_move.uci()} is illegal with current drawbacks, falling back to search")
-    except ImportError:
-        print("Book handling not available, falling back to search")
-        pass
-        
     # Set up time management
     start_time = time.time()
     max_time = min(time_limit, 30.0)  # Cap at 30 seconds to prevent hangs
@@ -185,28 +159,53 @@ def select_best_move(board, depth=3, time_limit=1.0):
         from AI.drawback_Bot import DrawbackBot
         engine = DrawbackBot()
         
+        # If we have book move bonuses, pass them to the engine
+        if book_move_bonuses:
+            engine.book_move_bonuses = book_move_bonuses
+            
         # Start with iterative deepening from lower depths
-        for current_depth in range(1, depth + 1):
+        best_move = None
+        best_score = -9999
+        
+        # Always search at least depth 1
+        for current_depth in range(1, min(depth, 10) + 1):
             # Check if we've used more than 80% of our time budget
             elapsed = time.time() - start_time
-            if elapsed > max_time * 0.8:
+            time_remaining = max_time - elapsed
+            
+            # Ensure we have at least 0.1s left for the search
+            if time_remaining < 0.1:
+                print(f"Breaking search at depth {current_depth-1} due to time constraint")
                 break
                 
             # Do a limited depth search
-            score, move = engine.search(board_copy, current_depth, time_limit=max_time - elapsed)
-            
-            # If we found a move, save it as our best so far
-            if move:
-                best_move = move
-                best_score = score
+            try:
+                score, move = engine.search(board_copy, current_depth, time_limit=time_remaining)
                 
-                # Early exit if we found a winning move
-                if score > 9000:  # Near mate score
-                    break
+                # If we found a move, save it as our best so far
+                if move:
+                    best_move = move
+                    best_score = score
                     
+                    # Early exit if we found a winning move
+                    if score > 9000:  # Near mate score
+                        print(f"Found winning move at depth {current_depth}")
+                        break
+                        
+                # Check time after each depth
+                elapsed = time.time() - start_time
+                if elapsed > max_time * 0.8:
+                    print(f"Time limit approaching, stopping at depth {current_depth}")
+                    break
+            except Exception as e:
+                print(f"Error at depth {current_depth}: {e}")
+                # Continue with the best move found so far
+                break
+                
         # Check if we found a move
-        if 'best_move' in locals():
+        if best_move:
             elapsed = time.time() - start_time
+            print(f"Search completed at max depth {current_depth} in {elapsed:.2f}s")
             return EngineResult(
                 move=best_move,
                 score=best_score,
@@ -223,6 +222,27 @@ def select_best_move(board, depth=3, time_limit=1.0):
     # Just pick the first available legal move
     legal_moves = list(board_copy.legal_moves)
     if legal_moves:
+        # If we have book moves, try to use one with the highest bonus
+        if book_move_bonuses:
+            best_book_move = None
+            best_bonus = -1
+            for move in legal_moves:
+                if move in book_move_bonuses and book_move_bonuses[move] > best_bonus:
+                    best_book_move = move
+                    best_bonus = book_move_bonuses[move]
+            
+            if best_book_move:
+                elapsed = time.time() - start_time
+                print(f"Using best book move as fallback: {best_book_move.uci()}")
+                return EngineResult(
+                    move=best_book_move,
+                    score=best_bonus,
+                    pv=[best_book_move.uci()],
+                    nodes=1,
+                    time=elapsed
+                )
+        
+        # Otherwise use first legal move
         fallback_move = legal_moves[0]
         elapsed = time.time() - start_time
         print(f"Using fallback move: {fallback_move.uci()}")

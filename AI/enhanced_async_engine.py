@@ -85,21 +85,46 @@ def run_search(board, depth, time_limit=5):
         print("No legal moves available - game should be over")
         return None
     
+    # Store book moves to influence search, but DON'T immediately return one
+    book_move = None
+    book_move_bonuses = {}
+    try:
+        from AI.book_handler import BookMoveSelector
+        book_selector = BookMoveSelector()
+        book_move_result = book_selector.get_weighted_book_move(board_copy)
+        
+        if book_move_result and book_move_result[0]:
+            book_move = book_move_result[0]
+            book_info = book_move_result[1]
+            book_move_bonuses = book_info.get("book_move_bonuses", {})
+            if book_move in legal_moves:
+                print(f"Found book move: {book_move} (will consider during search)")
+    except Exception as e:
+        print(f"Book move selection failed: {e}")
+    
     # Use the exact time limit as provided, without adjustments
     print(f"Using exact time limit: {time_limit}s")
     
+    # Minimum thinking time (to avoid instant moves)
+    min_think_time = 0.5
+    
     # Call the unified engine to get best move
-    result = select_best_move(board_copy, depth, time_limit)
+    result = select_best_move(board_copy, depth, time_limit, book_move_bonuses)
     
     # Log search statistics
     elapsed = time.time() - start_time
     print(f"Search completed in {elapsed:.2f}s, found move: {result.move}")
     
     # Ensure minimum thinking time for visual feedback
-    min_think_time = 0.5  # At least 0.5 second of "thinking"
+    # At least 0.5 second of "thinking"
     if elapsed < min_think_time:
         time.sleep(min_think_time - elapsed)
     
+    # If we have a book move and haven't found a better one, use it
+    if book_move and (result.move is None or result.score < 50):
+        print(f"Using book move as final choice: {book_move}")
+        return book_move
+        
     return result.move
 
 async def async_search(board, depth, time_limit=5):

@@ -310,10 +310,14 @@ def handle_ai_turn(board):
             import traceback
             traceback.print_exc()
         
-        print(f"Starting AI search for {('White' if board.turn else 'Black')} at depth {AI_DEPTH} with time limit {time_limit}s")
+        # Ensure depth and time limit are valid
+        search_depth = max(1, AI_DEPTH)
+        search_time_limit = max(0.5, time_limit)
+        
+        print(f"Starting AI search for {('White' if board.turn else 'Black')} at depth {search_depth} with time limit {search_time_limit}s")
         
         # Start the search using our enhanced async engine
-        start_search(board, AI_DEPTH, time_limit)
+        start_search(board, search_depth, search_time_limit)
         search_in_progress = True
         return
     
@@ -364,9 +368,11 @@ def handle_ai_turn(board):
         if engine_state.start_time is not None:
             current_time = time.time()
             elapsed_time = current_time - engine_state.start_time
+            search_time_limit = max(0.5, time_limit)
+            
             # If we've exceeded the time limit, force completion
-            if elapsed_time > time_limit * 1.5:  # Give a 50% buffer to be safe
-                print(f"Search exceeded time limit ({elapsed_time:.1f}s > {time_limit}s), forcing completion...")
+            if elapsed_time > search_time_limit * 1.5:  # Give a 50% buffer to be safe
+                print(f"Search exceeded time limit ({elapsed_time:.1f}s > {search_time_limit}s), forcing completion...")
                 
                 # Get whatever move we have so far
                 move = get_result()

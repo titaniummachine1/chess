@@ -8,8 +8,22 @@ from collections import namedtuple
 from AI.piece_square_table import PIECE_VALUES
 from AI.ai_utils import MATE_LOWER, MATE_UPPER, MAX_DEPTH
 
-# Transposition table entry
-Entry = namedtuple('Entry', 'lower upper move')
+# Define an entry for the transposition table
+class Entry:
+    """
+    Entry in the transposition table
+    
+    Attributes:
+        value: The score for this position
+        depth: The depth of the search that produced this score
+        flag: The type of node ('exact', 'lower', 'upper')
+        move: The best move found for this position
+    """
+    def __init__(self, value, depth, flag, move=None):
+        self.value = value
+        self.depth = depth
+        self.flag = flag  # 'exact', 'lower', or 'upper'
+        self.move = move
 
 def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
     """
@@ -117,206 +131,223 @@ def quiescence_search(bot, board, alpha, beta, depth=0, max_depth=5):
 
 def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescence=True, start_time=None, time_limit=None):
     """
-    Enhanced negamax search algorithm optimized for Drawback Chess.
-    Includes null move pruning, killer moves, history heuristics and transposition tables.
+    Negamax search with alpha-beta pruning. 
+    Optimized for Drawback Chess which has some unique rules.
     
-    Args:
-        bot: The DrawbackBot instance with evaluation methods
-        board: Current position
-        depth: Search depth
+    Parameters:
+        bot: The DrawbackBot instance
+        board: The current board position
+        depth: Remaining search depth
         alpha: Alpha bound
         beta: Beta bound
-        allow_null: Whether null move pruning is allowed
-        can_enter_quiescence: Whether search can enter quiescence at leaf nodes
-        start_time: Optional start time for time limit checking
-        time_limit: Optional time limit in seconds
+        allow_null: Whether to allow null-move pruning
+        can_enter_quiescence: Whether to use quiescence search at depth 0
+        start_time: Starting time of the search
+        time_limit: Time limit in seconds
         
     Returns:
-        Position score
+        The evaluated score for the position
     """
-    # Time limit check at the beginning of each call
+    # Store original alpha value for transposition table flag
+    alpha_orig = alpha
+    
+    # Check time limit if provided
     if start_time and time_limit and time.time() - start_time > time_limit:
-        # Signal time limit reached by returning the current alpha
-        return alpha
+        raise TimeoutError("Search time limit reached")
         
-    # Check for direct win opportunity (king capture in Drawback Chess)
-    for move in board.legal_moves:
-        target = board.piece_at(move.to_square)
-        if target and target.piece_type == chess.KING:
-            return MATE_UPPER - 1
-    
-    # Direct draw detection
-    # In Drawback Chess, a draw might still be a win due to special rules, 
-    # so we check for variant loss
-    if not any(True for _ in board.legal_moves):
-        if board.is_variant_loss():
-            return -MATE_UPPER
-        return 0  # Draw
-    
-    # Transposition table lookup
+    # Get position key for transposition table lookup
     key = board.zobrist_hash() if hasattr(board, 'zobrist_hash') else str(board.fen())
-    if key in bot.tt and bot.tt[key].lower <= bot.tt[key].upper:
-        if bot.tt[key].lower >= beta:
-            return bot.tt[key].lower
-        if bot.tt[key].upper <= alpha:
-            return bot.tt[key].upper
-        alpha = max(alpha, bot.tt[key].lower)
-        beta = min(beta, bot.tt[key].upper)
-
-    # Leaf node
+    
+    # Lookup position in transposition table
+    if key in bot.tt:
+        tt_entry = bot.tt[key]
+        if tt_entry.depth >= depth:
+            if tt_entry.flag == 'exact':
+                return tt_entry.value
+            elif tt_entry.flag == 'lower' and tt_entry.value > alpha:
+                alpha = tt_entry.value
+            elif tt_entry.flag == 'upper' and tt_entry.value < beta:
+                beta = tt_entry.value
+                
+            if alpha >= beta:
+                return tt_entry.value
+    
+    # Increment node counter
+    bot.nodes += 1
+    
+    # Base case: reached leaf node
     if depth <= 0:
         if can_enter_quiescence:
-            score = quiescence_search(bot, board, alpha, beta)
+            return quiescence_search(bot, board, alpha, beta)
         else:
-            score = bot.evaluate_position(board)
-        return score
+            return bot.evaluate_position(board)
 
-    # Null move pruning
-    if allow_null and depth >= 3 and not board.is_check():
-        # Don't use null move if the side to move is in danger of capture threat
-        king_square = None
-        for sq, piece in board.piece_map().items():
-            if piece and piece.piece_type == chess.KING and piece.color == board.turn:
-                king_square = sq
-                break
-        
-        can_use_null = True
-        if king_square:
-            # If in Drawback Chess we have pieces that threaten the king, don't use null move
-            attackers = board.attackers(not board.turn, king_square)
-            if attackers:
-                can_use_null = False
-                
-        if can_use_null:
-            R = 3 if depth >= 5 else 2  # Dynamic null move reduction
-            board.push(chess.Move.null())
-            null_score = -negamax(bot, board, depth - 1 - R, -beta, -beta + 1, False, False)
-            board.pop()
-            
-            if null_score >= beta:
-                return beta
+    # Check for terminal conditions
+    if not any(True for _ in board.legal_moves):
+        # This is a draw in standard chess, but in Drawback Chess could be a win or loss
+        if board.is_variant_loss():
+            return -MATE_UPPER + bot.nodes
+        return 0  # Draw
     
-    # Get killer moves for the current ply
-    killer1, killer2 = bot.killers[depth]
-    
-    # Move scoring for move ordering
-    def move_value(move):
-        """Score a move for move ordering"""
-        # Assign a score to each move for sorting
-        if move == killer1:
-            return 900000
-        if move == killer2:
-            return 800000
-            
-        # Use history table for non-captures
-        if not board.is_capture(move):
-            from_to = (move.from_square, move.to_square)
-            return bot.history.get(from_to, 0) 
-            
-        # Score captures
-        target = board.piece_at(move.to_square)
-        attacker = board.piece_at(move.from_square)
-        
-        if target and attacker:
-            # MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
-            target_symbol = target.symbol().upper()
-            attacker_symbol = attacker.symbol().upper()
-            target_value = PIECE_VALUES.get(target_symbol, (0, 0))[0]
-            attacker_value = PIECE_VALUES.get(attacker_symbol, (0, 0))[0]
-            
-            # King captures get highest priority
-            if target.piece_type == chess.KING:
-                return 1000000
-                
-            # Use MVV-LVA formula: 10 * victim value - attacker value
-            # This prioritizes capturing valuable pieces with less valuable attackers
-            return 10 * target_value - attacker_value + 500000
-            
-        return 0  # Default case
-    
-    # Get all legal moves and score them for move ordering
+    # Generate and score moves
     moves = list(board.legal_moves)
-    moves.sort(key=move_value, reverse=True)
     
-    # Initialize bounds
+    # No legal moves - it's a draw/stalemate
+    if not moves:
+        return 0  # Draw score
+    
+    # Score and sort moves for better pruning
+    scored_moves = []
+    for move in moves:
+        score = move_value(bot, board, move, key)
+        scored_moves.append((score, move))
+    
+    # Sort by score (highest first)
+    scored_moves.sort(reverse=True)
+    
+    # Initialize variables for storing the best move
     best_value = -MATE_UPPER
     best_move = None
     
-    # Iterate through moves
-    for move in moves:
-        bot.nodes += 1
+    # Search through moves
+    for i, (score, move) in enumerate(scored_moves):
+        # Try the move
+        board.push(move)
         
-        # Check time limit periodically (every 1000 nodes)
-        if start_time and time_limit and bot.nodes % 1000 == 0:
-            if time.time() - start_time > time_limit:
-                return alpha  # Return current best score
-        
+        # Recursive search
         try:
-            # Apply book move bonuses if available
-            book_bonus = 0
-            if hasattr(bot, 'book_move_bonuses') and bot.book_move_bonuses:
-                if move in bot.book_move_bonuses:
-                    book_bonus = bot.book_move_bonuses[move] / 100.0  # Convert centipawns to pawn units
-            
-            board.push(move)
-            # Reduced depth search for history pruning
-            if best_value > -MATE_LOWER and depth >= 3 and not board.is_capture(move) and move != killer1 and move != killer2:
-                score = -negamax(bot, board, depth - 2, -beta, -alpha, allow_null, can_enter_quiescence)
-                if score <= alpha:
-                    board.pop()
-                    continue
-            
-            # Full depth search    
-            score = -negamax(bot, board, depth - 1, -beta, -alpha, allow_null, can_enter_quiescence)
-            
-            # Add book bonus AFTER search
-            if book_bonus > 0:
-                score += book_bonus
-                
+            # Full-depth search for first move, reduced depth for others
+            if i == 0:
+                value = -negamax(bot, board, depth - 1, -beta, -alpha, allow_null, can_enter_quiescence, start_time, time_limit)
+            else:
+                # Late move reduction - search with reduced depth first
+                if depth >= 3 and i >= 3 and not board.is_capture(move) and not move.promotion:
+                    # Reduced depth search
+                    value = -negamax(bot, board, depth - 2, -alpha - 1, -alpha, False, can_enter_quiescence, start_time, time_limit)
+                    # Re-search if promising
+                    if value > alpha:
+                        value = -negamax(bot, board, depth - 1, -beta, -alpha, allow_null, can_enter_quiescence, start_time, time_limit)
+                else:
+                    value = -negamax(bot, board, depth - 1, -beta, -alpha, allow_null, can_enter_quiescence, start_time, time_limit)
+                    
             board.pop()
             
-            # Beta cutoff
-            if score >= beta:
-                # Update history scores
-                if not board.is_capture(move):
-                    from_to = (move.from_square, move.to_square)
-                    if from_to in bot.history:
-                        bot.history[from_to] += depth * depth
-                    else:
-                        bot.history[from_to] = depth * depth
-                    
-                    # Update killer moves
-                    if move != killer1:
-                        bot.killers[depth] = (move, killer1)
-                
-                # Update transposition table (lower bound)
-                bot.tt[key] = Entry(score, MATE_UPPER, move)
-                return beta
-            
-            # Alpha improvement
-            if score > best_value:
-                best_value = score
+            # Update best value
+            if value > best_value:
+                best_value = value
                 best_move = move
                 
-                if score > alpha:
-                    alpha = score
-        except Exception:
+                # Update alpha
+                if value > alpha:
+                    alpha = value
+                    
+                    # Store move in transposition table
+                    bot.tt[key] = Entry(value, depth, 'exact', move)
+                    
+                    # Beta cutoff
+                    if alpha >= beta:
+                        # Store killer move
+                        if not board.is_capture(move):
+                            bot.killers[depth][1] = bot.killers[depth][0]
+                            bot.killers[depth][0] = move
+                            
+                        # Store move ordering info
+                        if not board.is_capture(move):
+                            bot.history[(move.from_square, move.to_square)] = depth * depth
+                            
+                        # Store in transposition table
+                        bot.tt[key] = Entry(value, depth, 'lower', move)
+                        return value
+        except TimeoutError:
             board.pop()
+            # Return best move found so far
+            if best_move:
+                bot.tt[key] = Entry(best_value, depth, 'exact', best_move)
+            raise
+        except Exception as e:
+            board.pop()
+            # Just continue with next move
             continue
+            
+    # If no move improved alpha, store the position as an upper bound
+    if best_move is None and len(scored_moves) > 0:
+        best_move = scored_moves[0][1]  # Use the highest scored move as fallback
         
-    # No legal moves - this should be caught earlier but just in case
-    if best_value == -MATE_UPPER:
-        # Check if this is a checkmate or stalemate
-        return 0  # Draw - should be updated if drawbacks change this
-        
-    # Update transposition table
-    if best_move:
-        # We have a PV-node or a cut-node
-        if best_value <= alpha:
-            # All-node (upper bound)
-            bot.tt[key] = Entry(-MATE_UPPER, best_value, None)
-        else:
-            # PV-node (exact)
-            bot.tt[key] = Entry(best_value, best_value, best_move)
+    # Store best move in transposition table with appropriate flag
+    if best_value <= alpha_orig:
+        bot.tt[key] = Entry(best_value, depth, 'upper', best_move)
+    else:
+        bot.tt[key] = Entry(best_value, depth, 'exact', best_move)
     
     return best_value 
+
+def move_value(bot, board, move, key):
+    """
+    Score a move for move ordering in negamax search
+    
+    Parameters:
+        bot: The bot instance containing history and killer move tables
+        board: The current chess board
+        move: The move to score
+        key: The position hash key
+        
+    Returns:
+        A numeric score for the move (higher is better)
+    """
+    # Check if this is a TT move (highest priority)
+    if key in bot.tt and bot.tt[key].move == move:
+        return 10000000
+    
+    # Killer moves (good non-captures found during search)
+    if move in bot.killers[bot.depth]:
+        return 9000000
+    
+    # Captures are sorted by MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+    if board.is_capture(move):
+        victim = board.piece_at(move.to_square)
+        aggressor = board.piece_at(move.from_square)
+        
+        if victim and aggressor:
+            victim_symbol = victim.symbol().upper()
+            aggressor_symbol = aggressor.symbol().upper()
+            
+            # Get piece values
+            victim_value = PIECE_VALUES.get(victim_symbol, (100, 0))[0]
+            aggressor_value = PIECE_VALUES.get(aggressor_symbol, (100, 0))[0]
+            
+            # King captures are highest priority
+            if victim.piece_type == chess.KING:
+                return 9500000
+                
+            # MVV-LVA formula: victim value - attacker value / 10
+            # This prioritizes capturing valuable pieces with less valuable attackers
+            return 8000000 + (victim_value * 100 - aggressor_value)
+    
+    # Promotions are high priority
+    if move.promotion:
+        promotion_value = {
+            chess.QUEEN: 800,
+            chess.ROOK: 500,
+            chess.BISHOP: 320,
+            chess.KNIGHT: 300
+        }
+        return 7000000 + promotion_value.get(move.promotion, 0)
+    
+    # History heuristic for quiet moves
+    history_score = bot.history.get((move.from_square, move.to_square), 0)
+    
+    # Book moves
+    book_bonus = 0
+    if hasattr(bot, 'book_move_bonuses') and bot.book_move_bonuses and move in bot.book_move_bonuses:
+        book_bonus = bot.book_move_bonuses[move] * 10000  # Scale up book bonus
+    
+    # Center control for pawns
+    center_bonus = 0
+    if board.piece_at(move.from_square) and board.piece_at(move.from_square).piece_type == chess.PAWN:
+        to_file, to_rank = chess.square_file(move.to_square), chess.square_rank(move.to_square)
+        # Center files (c, d, e, f)
+        if 2 <= to_file <= 5:
+            # Center ranks (3, 4, 5, 6) - higher for advanced ranks
+            center_bonus = (to_rank - 1) * 10 if board.turn == chess.WHITE else (8 - to_rank) * 10
+    
+    return history_score + book_bonus + center_bonus 
