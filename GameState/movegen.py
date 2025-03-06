@@ -374,3 +374,50 @@ class DrawbackBoard(chess.Board):
         self._last_capture_square = None
         
         return result
+
+    def check_drawback_win(self, color, drawback_name) -> bool:
+        """
+        Check if the specified player has won due to a drawback condition.
+        This is a standardized method to ensure consistent evaluation for both players.
+        
+        Args:
+            color: The player to check for winning (chess.WHITE or chess.BLACK)
+            drawback_name: The name of the drawback to check
+            
+        Returns:
+            bool: True if player has won due to the drawback, False otherwise
+        """
+        opponent = not color
+        
+        # Special case for atomic bomb - we need to check adjacency to king
+        if drawback_name == "atomic_bomb" and hasattr(self, '_last_capture_square') and self._last_capture_square is not None:
+            # Find the opponent's king
+            king_square = None
+            for square, piece in self.piece_map().items():
+                if piece and piece.piece_type == chess.KING and piece.color == opponent:
+                    king_square = square
+                    break
+            
+            if king_square is not None:
+                # Check if the last capture was adjacent to the king
+                capture_square = self._last_capture_square
+                king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                capture_file = chess.square_file(capture_square)
+                capture_rank = chess.square_rank(capture_square)
+                
+                # If they're adjacent (within 1 square in any direction)
+                if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
+                    if king_square != capture_square:  # Not the king itself
+                        return True
+        
+        # For other drawbacks, use the loss function from drawback_manager
+        try:
+            from GameState.drawback_manager import get_drawback_loss_function
+            loss_function = get_drawback_loss_function(drawback_name)
+            if loss_function and loss_function(self, opponent):
+                return True
+        except (ImportError, Exception):
+            pass
+            
+        # No win condition found
+        return False

@@ -202,68 +202,17 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
             return -MATE_UPPER + bot.nodes + depth
         return 0  # Draw
 
-    # Define a helper function to detect atomic bomb loss for consistent evaluation
-    def is_atomic_bomb_loss(board, color):
-        if not hasattr(board, 'get_active_drawback') or not hasattr(board, '_last_capture_square'):
-            return False
-        
-        # Only check if atomic bomb is active
-        active_drawback = board.get_active_drawback(color)
-        if active_drawback != "atomic_bomb":
-            return False
-            
-        # Only check if a capture happened
-        if not board._last_capture_square:
-            return False
-            
-        # Find the king
-        king_square = None
-        for square, piece in board.piece_map().items():
-            if piece and piece.piece_type == chess.KING and piece.color == color:
-                king_square = square
-                break
-                
-        if not king_square:
-            return False
-            
-        # Check if the capture is adjacent to the king
-        capture_square = board._last_capture_square
-        king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
-        capture_file = chess.square_file(capture_square)
-        capture_rank = chess.square_rank(capture_square)
-        
-        # If they're adjacent (within 1 square in any direction)
-        if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
-            if king_square != capture_square:  # Not the king itself
-                return True
-                
-        return False
-
     # Check for immediate loss by drawback win conditions
     if hasattr(board, 'check_drawback_win'):
         active_drawback = board.get_active_drawback(board.turn) if hasattr(board, 'get_active_drawback') else None
         
         if active_drawback:
-            # Check if current position is already a loss due to drawback
-            is_loss = False
+            # Directly check if current player (whose turn it is) has lost due to drawback
+            opponent_color = not board.turn
             
-            # Check specifically for atomic bomb loss
-            if active_drawback == "atomic_bomb":
-                is_loss = is_atomic_bomb_loss(board, board.turn)
-            
-            # If not an atomic bomb loss, try other drawback loss functions
-            if not is_loss:
-                try:
-                    from GameState.drawback_manager import get_drawback_loss_function
-                    loss_function = get_drawback_loss_function(active_drawback)
-                    if loss_function and loss_function(board, board.turn):
-                        is_loss = True
-                except Exception:
-                    pass
-                
-            # If it's a loss, return a very negative score
-            # Add depth to prefer longer paths to inevitable loss
-            if is_loss:
+            # Use standardized check_drawback_win method to ensure consistent scoring
+            if board.check_drawback_win(opponent_color, active_drawback):
+                # When losing, add depth to prefer longer paths to inevitable loss
                 return -MATE_UPPER + bot.nodes + depth
     
     # Generate legal moves
@@ -321,31 +270,15 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         if hasattr(board, 'get_active_drawback') and hasattr(board, 'check_drawback_win'):
             active_drawback = board.get_active_drawback(not board.turn)  # Check opponent's drawback
             if active_drawback:
-                # For move ordering, use the board's drawback win check
-                is_drawback_win = board.check_drawback_win(not board.turn, active_drawback)
+                # For move ordering, use the standardized drawback win check
+                is_drawback_win = board.check_drawback_win(board.turn, active_drawback)
                 
                 # Check if opponent has any legal moves with their drawback
                 if not is_drawback_win:
                     has_moves = any(True for _ in board.legal_moves)
                     if not has_moves:
                         is_no_legal_moves = True
-                        
-                # For atomic bomb, check specifically if this capture is adjacent to opponent's king
-                if active_drawback == "atomic_bomb" and board.is_capture(move):
-                    # Set the last capture square for atomic bomb check
-                    old_capture_square = board._last_capture_square if hasattr(board, '_last_capture_square') else None
-                    if hasattr(board, '_last_capture_square'):
-                        board._last_capture_square = move.to_square
-                    
-                    # Use the same function for consistency
-                    if is_atomic_bomb_loss(board, not board.turn):
-                        is_drawback_win = True
-                        score = 30000000  # Even higher priority than other wins
-                    
-                    # Restore the last capture square
-                    if hasattr(board, '_last_capture_square'):
-                        board._last_capture_square = old_capture_square
-        
+
         board.pop()
         
         if is_variant_win or is_drawback_win:
@@ -442,23 +375,15 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         
         # Check for immediate win due to drawback
         win_by_drawback = False
-        if hasattr(board, 'get_active_drawback'):
+        if hasattr(board, 'check_drawback_win'):
             opponent_color = not board.turn
-            active_drawback = board.get_active_drawback(opponent_color)
+            active_drawback = board.get_active_drawback(opponent_color) if hasattr(board, 'get_active_drawback') else None
             
-            # For atomic bomb, use our consistent check function
-            if active_drawback == "atomic_bomb":
-                win_by_drawback = is_atomic_bomb_loss(board, opponent_color)
-            # For other drawbacks, use the loss function
-            elif active_drawback and hasattr(board, 'check_drawback_win'):
-                try:
-                    from GameState.drawback_manager import get_drawback_loss_function
-                    loss_function = get_drawback_loss_function(active_drawback)
-                    if loss_function and loss_function(board, opponent_color):
-                        win_by_drawback = True
-                except Exception:
-                    pass
-            
+            # Use standardized method for consistent scoring
+            if active_drawback:
+                current_color = board.turn
+                win_by_drawback = board.check_drawback_win(current_color, active_drawback)
+        
         # If this move leads to a win by drawback, return a winning score
         # Subtract depth to prefer shorter paths to checkmate
         if win_by_drawback:
