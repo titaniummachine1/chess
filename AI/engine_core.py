@@ -11,7 +11,7 @@ from collections import namedtuple
 import random
 
 # Import engine components
-from AI.drawback_sunfish import best_move as sunfish_best_move
+from AI.drawback_Bot import best_move as bot_best_move
 from AI.ai_utils import get_king_capture_move, MATE_LOWER, MATE_UPPER, MAX_DEPTH
 from AI.book_handler import BookMoveSelector
 from AI.evaluation import evaluate_position
@@ -145,51 +145,8 @@ def select_best_move(board, depth=3, time_limit=1.0):
                 time=time.time() - start_time
             )
         
-        # Check for Atomic Bomb win - capturing piece adjacent to opponent king
-        # This is a special optimization to prioritize winning moves
-        opponent_color = not board.turn
-        opponent_drawback = board.get_active_drawback(opponent_color)
-        
-        if opponent_drawback == "atomic_bomb":
-            # Find opponent king
-            king_square = None
-            for square, piece in board.piece_map().items():
-                if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
-                    king_square = square
-                    break
-                    
-            # If king found, look for adjacent capture opportunities
-            if king_square:
-                # Get adjacent squares
-                king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
-                for r_delta in [-1, 0, 1]:
-                    for f_delta in [-1, 0, 1]:
-                        if r_delta == 0 and f_delta == 0:
-                            continue  # Skip king's own square
-                            
-                        adj_file, adj_rank = king_file + f_delta, king_rank + r_delta
-                        if 0 <= adj_file < 8 and 0 <= adj_rank < 8:
-                            adj_square = chess.square(adj_file, adj_rank)
-                            
-                            # Check if there's an opponent piece here
-                            adj_piece = board.piece_at(adj_square)
-                            if adj_piece and adj_piece.color == opponent_color:
-                                # Look for moves that capture this piece
-                                for move in board.legal_moves:
-                                    if move.to_square == adj_square:
-                                        print(f"Found atomic bomb win: {move}")
-                                        return EngineResult(
-                                            move=move,
-                                            score=MATE_UPPER - 1,
-                                            pv=[move],
-                                            nodes=1,
-                                            time=time.time() - start_time
-                                        )
-        
-        # Try to get a book move
-        book_move, book_info = book_selector.get_weighted_book_move(board)
-        
         # Extract book move bonuses from the info
+        book_move, book_info = book_selector.get_weighted_book_move(board)
         book_move_bonuses = book_info.get("book_move_bonuses", {})
         special_move = book_info.get("special_move", None)
         all_book_moves = book_info.get("all_book_moves", [])
@@ -203,7 +160,7 @@ def select_best_move(board, depth=3, time_limit=1.0):
                 
             # Run the search with book move information
             # We let the search make the decision rather than returning the book move directly
-            move = sunfish_best_move(board, depth, time_limit, book_move_bonuses)
+            move = bot_best_move(board, depth, time_limit, book_move_bonuses)
             
             # Calculate elapsed time
             elapsed = time.time() - start_time
@@ -222,14 +179,14 @@ def select_best_move(board, depth=3, time_limit=1.0):
             
             return EngineResult(
                 move=move,
-                score=0,  # We don't have the score from sunfish here
+                score=0,  # We don't have the score from the engine here
                 pv=[move] if move else [],
                 nodes=0,  # We don't have node count
                 time=elapsed
             )
         else:
             # No book moves, run normal search
-            move = sunfish_best_move(board, depth, time_limit)
+            move = bot_best_move(board, depth, time_limit)
             
             # Calculate elapsed time
             elapsed = time.time() - start_time
@@ -242,7 +199,7 @@ def select_best_move(board, depth=3, time_limit=1.0):
             
             return EngineResult(
                 move=move,
-                score=0,  # We don't have the score from sunfish here
+                score=0,  # We don't have the score from the engine here
                 pv=[move] if move else [],
                 nodes=0,  # We don't have node count
                 time=elapsed

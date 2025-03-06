@@ -10,9 +10,10 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+import chess
 
 # Import engine components
-from AI.engine_core import select_best_move, analyze_position, EngineResult
+from AI.engine_core import select_best_move, analyze_position, check_drawback_loss_conditions, EngineResult
 from GameState.movegen import DrawbackBoard
 
 # Global state for async search
@@ -61,6 +62,21 @@ def run_search(board, depth, time_limit=5):
     # Always use a copy of the board for thread safety
     board_copy = board.copy()
     
+    # Check for win conditions immediately
+    # 1. Direct king capture (checkmate in standard chess)
+    for move in board_copy.legal_moves:
+        target = board_copy.piece_at(move.to_square)
+        if target and target.piece_type == chess.KING:
+            print(f"Found immediate win (king capture): {move}")
+            return move
+            
+    # 2. Check for specific drawback win conditions
+    has_loss, losing_color, reason = check_drawback_loss_conditions(board_copy)
+    if has_loss and losing_color != board_copy.turn:
+        print(f"Found drawback win condition: {reason}")
+        # Look for the move that triggers this win
+        # Since this is complex, let the engine figure it out
+    
     # Verify legal moves available
     position_stats = analyze_position(board_copy)
     legal_moves = position_stats.legal_moves
@@ -96,7 +112,7 @@ async def async_search(board, depth, time_limit=5):
         time_limit: Time limit in seconds
     """
     global engine_state
-    engine_state.current_progress = f"Searching at depth {depth}..."
+    engine_state.current_progress = f"Analyzing position at depth {depth}..."
     engine_state.start_time = time.time()
     engine_state.depth = depth
     engine_state.time_limit = time_limit
@@ -114,7 +130,7 @@ async def async_search(board, depth, time_limit=5):
         engine_state.current_result = result
         
         if result:
-            engine_state.current_progress = "Search complete"
+            engine_state.current_progress = "Analysis complete"
         else:
             engine_state.current_progress = "No move found"
     except Exception as e:
@@ -157,7 +173,7 @@ def get_progress():
     global engine_state
     
     # Calculate elapsed time if search is in progress
-    if engine_state.start_time and engine_state.current_progress != "Idle" and engine_state.current_progress != "Search complete":
+    if engine_state.start_time and engine_state.current_progress != "Idle" and engine_state.current_progress != "Analysis complete":
         elapsed = time.time() - engine_state.start_time
         if elapsed > 0.5:  # Only show time after half a second
             return f"{engine_state.current_progress} ({elapsed:.1f}s)"
