@@ -18,13 +18,18 @@ class BookMoveSelector:
         self.main_book_moves = []
         
     def get_weighted_book_move(self, board):
-        """Get book moves with bell curve distribution of weights"""
+        """
+        Get book moves with statistical weighting.
+        Returns both a suggested move and additional info including:
+        - book_move_bonuses: Dict with bonus values for each book move
+        - special_move: The randomly selected move with extra bonus (if any)
+        """
         # Get all book moves for current position
         book_moves = OPENING_BOOK.get_book_moves(board)
         print(f"BOOK DEBUG: Found {len(book_moves)} book moves for current position")
         
         if not book_moves:
-            return None, {}
+            return None, {"book_move_bonuses": {}, "special_move": None}
             
         # Print all available book moves with their weights
         print(f"BOOK DEBUG: Available moves: {', '.join([f'{move}:{weight}' for move, weight in book_moves])}")
@@ -48,14 +53,14 @@ class BookMoveSelector:
         
         # If no legal book moves remain after filtering
         if not legal_book_moves:
-            return None, {}
+            return None, {"book_move_bonuses": {}, "special_move": None}
             
         book_moves = legal_book_moves
         
         # Calculate move weights based on frequency
         total_freq = sum(freq for _, freq in book_moves)
         if total_freq == 0:
-            return None, {}
+            return None, {"book_move_bonuses": {}, "special_move": None}
             
         # Normalize frequencies to get probabilities
         move_probs = {}
@@ -72,95 +77,42 @@ class BookMoveSelector:
             normalized_prob = ((freq + 1) / (total_freq + len(book_moves))) * random_factor
             move_probs[move] = normalized_prob
         
-        # Select 3-4 main book moves randomly with probability proportional to frequency
-        num_main_moves = min(4, len(book_moves))
-        if num_main_moves == 0:
-            return None, {}
+        # Select suggested move weighted by probability
+        moves = list(move_probs.keys())
+        probs = [move_probs[m] for m in moves]
+        total_prob = sum(probs)
+        if total_prob > 0:  # Normalize probabilities
+            probs = [p/total_prob for p in probs]
         
-        # Check history of selected moves to avoid repetition
-        position_key = board.fen().split(' ')[0]  # Use board position only
-        if not hasattr(self, 'position_history'):
-            self.position_history = {}
-        
-        position_hist = self.position_history.get(position_key, {})
-        
-        # Reduce probability for previously chosen moves
-        for move in move_probs:
-            if move in position_hist:
-                # Penalize moves we've chosen before in this position
-                move_probs[move] *= max(0.3, 1.0 - (position_hist[move] * 0.2))
-                print(f"BOOK DEBUG: Adjusting probability of {move} due to history: {move_probs[move]:.4f}")
-        
-        # Selection logic
-        # ... existing code for selecting weighted moves ...
-        
-        # Select main moves
-        self.main_book_moves = []
-        try:
-            # Try to use numpy's choice for weighted selection
-            moves_list = list(move_probs.keys())
-            probs_list = list(move_probs.values())
+        # Select a special move to get extra bonus
+        special_move = None
+        if moves:
+            special_move = random.choices(moves, weights=probs, k=1)[0]
+            print(f"BOOK DEBUG: Special move selected: {special_move} (gets 30cp bonus)")
             
-            # Normalize probabilities to sum to 1
-            probs_sum = sum(probs_list)
-            if probs_sum > 0:
-                probs_list = [p/probs_sum for p in probs_list]
+        # Prepare bonus values for all book moves - standard 25cp (0.25 pawns)
+        # Special move gets 30cp (0.30 pawns)
+        book_move_bonuses = {}
+        for move in moves:
+            # Standard book move bonus: 25cp
+            book_move_bonuses[move] = 25
             
-            # Select moves with randomized weights
-            main_indices = np.random.choice(
-                len(moves_list), 
-                size=num_main_moves, 
-                replace=False, 
-                p=probs_list
-            )
-            self.main_book_moves = [moves_list[i] for i in main_indices]
-        except:
-            # Fallback if numpy not available
-            weighted_moves = []
-            for move, prob in move_probs.items():
-                weighted_moves.extend([move] * max(1, int(prob * 100)))
+        # The special move gets an extra 5cp (30cp total)
+        if special_move:
+            book_move_bonuses[special_move] = 30
             
-            selected = set()
-            max_attempts = 100  # Prevent infinite loop
-            attempts = 0
-            while len(selected) < num_main_moves and weighted_moves and attempts < max_attempts:
-                move = random.choice(weighted_moves)
-                if move not in selected:
-                    selected.add(move)
-                attempts += 1
-            
-            self.main_book_moves = list(selected)
+        # Choose a suggested move based on probabilities
+        suggested_move = None
+        if moves:
+            suggested_move = random.choices(moves, weights=probs, k=1)[0]
         
-        # Create bell curve weights for PST adjustments
-        bell_weights = {}
+        result_info = {
+            "book_move_bonuses": book_move_bonuses,
+            "special_move": special_move,
+            "all_book_moves": [m for m in moves]
+        }
         
-        # All main moves get top bell curve values (0.9-1.0) evenly distributed
-        if self.main_book_moves:
-            # Evenly distribute top main moves between 0.9-1.0
-            top_range = 0.1  # range from 0.9 to 1.0
-            step = top_range / len(self.main_book_moves) if len(self.main_book_moves) > 1 else 0.1
-            
-            # Add random variation to make bell curves unique each time
-            for i, move in enumerate(self.main_book_moves):
-                # Place each main move at an even interval on top of bell curve with small random variation
-                variation = random.uniform(-0.02, 0.02)  # Small variation
-                bell_weights[move] = min(1.0, 0.9 + (i * step) + variation)
-                
-                # Update position history for this move
-                if position_key not in self.position_history:
-                    self.position_history[position_key] = {}
-                self.position_history[position_key][move] = self.position_history.get(position_key, {}).get(move, 0) + 1
-        
-        # Choose random move from main moves to highlight - different each time
-        suggested_move = random.choice(self.main_book_moves) if self.main_book_moves else None
-        
-        # Print what we're choosing
-        if suggested_move:
-            print(f"BOOK DEBUG: Selected main moves: {[str(m) for m in self.main_book_moves]}")
-            print(f"BOOK DEBUG: Primary suggestion: {suggested_move}, Weight: {bell_weights.get(suggested_move, 0):.4f}")
-        
-        # Return the suggested move and weights
-        return suggested_move, {"weights": bell_weights, "default": 0.2}  # Low value for non-book moves
+        return suggested_move, result_info
         
     def adjust_piece_square_values(self, board, color, move, pst_values, weights):
         """
@@ -206,6 +158,7 @@ class BookMoveSelector:
                     result[square] = orig_value * (0.5 + 0.5 * square_weight)
             else:
                 # Keep original value for non-positive values
+                
                 result[square] = orig_value
                 
         return result

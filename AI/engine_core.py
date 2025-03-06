@@ -187,53 +187,66 @@ def select_best_move(board, depth=3, time_limit=1.0):
                                         )
         
         # Try to get a book move
-        book_move, _ = book_selector.get_weighted_book_move(board)
-        if book_move:
-            # Check if the book move is legal with current drawbacks
-            if book_move in board.legal_moves:
-                # Force minimum thinking time for book moves too
-                elapsed = time.time() - start_time
-                min_think_time = max(0.5, time_limit * 0.25)  # At least 0.5s or 25% of time limit
+        book_move, book_info = book_selector.get_weighted_book_move(board)
+        
+        # Extract book move bonuses from the info
+        book_move_bonuses = book_info.get("book_move_bonuses", {})
+        special_move = book_info.get("special_move", None)
+        all_book_moves = book_info.get("all_book_moves", [])
+        
+        # Apply book move bonuses during search, but let the AI choose the final move
+        if book_move_bonuses:
+            # There are book moves, but we'll let the search make the final decision
+            print(f"Found {len(book_move_bonuses)} legal book moves for this position")
+            if special_move:
+                print(f"Special book move: {special_move} (gets 30cp bonus)")
                 
-                if elapsed < min_think_time:
-                    remaining = min_think_time - elapsed
-                    print(f"Waiting {remaining:.2f}s to simulate thinking on book move")
-                    time.sleep(remaining)
-                
-                # Add slight randomness to book move selection based on drawbacks
-                active_drawback = board.get_active_drawback(board.turn)
-                if active_drawback and random.random() < 0.3:  # 30% chance to ignore book move with drawback
-                    print(f"Ignoring book move due to active drawback: {active_drawback}")
+            # Run the search with book move information
+            # We let the search make the decision rather than returning the book move directly
+            move = sunfish_best_move(board, depth, time_limit, book_move_bonuses)
+            
+            # Calculate elapsed time
+            elapsed = time.time() - start_time
+            
+            # Ensure we have a move, even if engine failed
+            if not move and len(list(board.legal_moves)) > 0:
+                # Fallback to the suggested book move if available
+                if book_move and book_move in board.legal_moves:
+                    move = book_move
+                    print(f"Search failed, using suggested book move: {move}")
                 else:
-                    return EngineResult(
-                        move=book_move,
-                        score=100,  # Arbitrary positive score for book moves
-                        pv=[book_move],
-                        nodes=0,
-                        time=time.time() - start_time
-                    )
-            else:
-                print(f"Book move {book_move} is not legal with current drawback")
-        
-        # Fall back to engine search
-        move = sunfish_best_move(board, depth, time_limit)
-        
-        # Calculate elapsed time
-        elapsed = time.time() - start_time
-        
-        # Ensure we have a move, even if engine failed
-        if not move and len(list(board.legal_moves)) > 0:
-            # Fallback to first legal move (better than random for determinism)
-            stats = analyze_position(board)
-            move = stats.legal_moves[0] if stats.legal_moves else None
-        
-        return EngineResult(
-            move=move,
-            score=0,  # We don't have the score from sunfish here
-            pv=[move] if move else [],
-            nodes=0,  # We don't have node count
-            time=elapsed
-        )
+                    # Fallback to first legal move (better than random for determinism)
+                    stats = analyze_position(board)
+                    move = stats.legal_moves[0] if stats.legal_moves else None
+                    print(f"Search failed, using first legal move: {move}")
+            
+            return EngineResult(
+                move=move,
+                score=0,  # We don't have the score from sunfish here
+                pv=[move] if move else [],
+                nodes=0,  # We don't have node count
+                time=elapsed
+            )
+        else:
+            # No book moves, run normal search
+            move = sunfish_best_move(board, depth, time_limit)
+            
+            # Calculate elapsed time
+            elapsed = time.time() - start_time
+            
+            # Ensure we have a move, even if engine failed
+            if not move and len(list(board.legal_moves)) > 0:
+                # Fallback to first legal move (better than random for determinism)
+                stats = analyze_position(board)
+                move = stats.legal_moves[0] if stats.legal_moves else None
+            
+            return EngineResult(
+                move=move,
+                score=0,  # We don't have the score from sunfish here
+                pv=[move] if move else [],
+                nodes=0,  # We don't have node count
+                time=elapsed
+            )
     finally:
         # Always clear the search flag when done
         board._in_search = False

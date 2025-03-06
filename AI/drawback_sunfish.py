@@ -227,7 +227,8 @@ class DrawbackSunfish:
         if opponent_king_square:
             for move in board.legal_moves:
                 if move.to_square == opponent_king_square:
-                    return MATE_UPPER - ply  # Immediate king capture (checkmate)
+                    # Found immediate win (king capture)!
+                    return MATE_UPPER - depth
         
         # 2. Atomic Bomb drawback special win condition
         # Check if we can capture a piece adjacent to opponent's king
@@ -376,29 +377,48 @@ class DrawbackSunfish:
             board_copy = board.copy()
             board_copy.push(move)
             
-            # REMOVE book bonus entirely - rely solely on PST adjustments
-            # Let the PST table adjustments from book_handler influence evaluation
+            # Apply Late Move Reduction - search less deeply on low-priority moves
+            if len(board.legal_moves) >= 4 and depth >= 3 and num_searched >= 2 and not is_check and not board.is_capture(move):
+                # Reduce depth for moves searched later
+                reduced_depth = depth - 1
+                score = -self.negamax(board_copy, reduced_depth, -alpha-1, -alpha, ply+1, True, start_time, time_limit)
+                # Only do full-depth search if the reduced search returns a promising score
+                if score <= alpha:
+                    continue  # Skip this move - failed low in reduced search
+            
+            # Apply book move bonuses for this specific move during search
+            book_move_bonus = 0
+            if hasattr(self, 'book_move_bonuses') and move in self.book_move_bonuses:
+                # Book move bonuses are in centipawns (e.g., 25 = 0.25 pawns)
+                book_move_bonus = self.book_move_bonuses[move] / 100.0
+                
+            # Full-depth search
             score = -self.negamax(board_copy, depth - 1, -beta, -alpha, ply + 1, True, start_time, time_limit)
             
-            # Update best score and move
-            if score > best_score:
-                best_score = score
+            # Add book move bonus after search (avoid affecting transposition table)
+            if book_move_bonus > 0:
+                score += book_move_bonus
+                
+            if score >= beta:
+                # Beta cutoff - add to killer moves and history
+                if not board.is_capture(move):
+                    # Update killers
+                    self.killers[ply][1] = self.killers[ply][0]
+                    self.killers[ply][0] = move
+                    # Update history heuristic
+                    move_key = (move.from_square, move.to_square)
+                    self.history[move_key] = self.history.get(move_key, 0) + depth * depth
+                
+                # Store in transposition table
+                self.tt[pos] = Entry(score, MATE_UPPER, move)
+                return beta
+            
+            if score > alpha:
+                alpha = score
                 best_move = move
                 
-            # Alpha-beta pruning
-            alpha = max(alpha, score)
-            if alpha >= beta:
-                # Store killer move for non-captures
-                if not board.is_capture(move):
-                    if move != self.killers[ply][0]:
-                        self.killers[ply][1] = self.killers[ply][0]
-                        self.killers[ply][0] = move
-                
-                # Update history heuristic
-                if not board.is_capture(move):
-                    key = (board.turn, move.from_square, move.to_square)
-                    self.history[key] = self.history.get(key, 0) + depth * depth
-                break
+                # Update the TT with the best move so far
+                self.tt[pos] = Entry(alpha, alpha, move)
 
         # Store in transposition table
         if best_score <= alpha_orig:
@@ -410,218 +430,69 @@ class DrawbackSunfish:
         
         return best_score
     
-    def search(self, board, depth, time_limit=5):
-        """Improved search with better book move selection and PST adjustments"""
+    def search(self, board, depth, time_limit=5, book_move_bonuses=None):
+        """
+        Iterative deepening search with proper time management
+        
+        Args:
+            board: Chess board position
+            depth: Maximum search depth
+            time_limit: Time limit in seconds
+            book_move_bonuses: Dictionary of book moves with their bonus values in centipawns
+        
+        Returns:
+            Best move found within time limit
+        """
+        # Track start time for enforcing time limit
+        start_time = time.time()
+        
+        # Create a copy to avoid modifying original
+        board_copy = board.copy()
+        board_copy._in_search = True
+        
+        # Store book move bonuses for use during search
+        self.book_move_bonuses = book_move_bonuses or {}
+        
+        # Clear transposition table for new search
+        self.tt = {}
+        self.nodes = 0  # Reset node count
+        
+        # Reset search heuristics
+        self.history = {}
+        self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
+
+        # Print key position info for debugging
+        print(f"DEBUG: Searching position: {board.fen()}")
+        print(f"DEBUG: Move count: {len(board.move_stack)}, Turn: {'White' if board.turn else 'Black'}")
+        
+        # Get book move suggestions with better debugging
         try:
-            self.nodes = 0
-            self.tt.clear()
-            self.history.clear()
-            self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]
-            self.eval_cache.clear()
+            from AI.book_handler import BOOK_SELECTOR
             
-            # Print key position info for debugging
-            print(f"DEBUG: Searching position: {board.fen()}")
-            print(f"DEBUG: Move count: {len(board.move_stack)}, Turn: {'White' if board.turn else 'Black'}")
+            # Get book move and PST adjustment weights
+            suggested_book_move, pst_weights = BOOK_SELECTOR.get_weighted_book_move(board)
             
-            # Get book move suggestions with better debugging
-            try:
-                from AI.book_handler import BOOK_SELECTOR
+            if suggested_book_move:
+                # Store the suggested move and weights to influence search
+                self.book_move_selected = suggested_book_move
+                self.pst_adjustment_weights = pst_weights
+                print(f"DEBUG: Book position found, biasing evaluation toward: {suggested_book_move}")
                 
-                # Get book move and PST adjustment weights
-                suggested_book_move, pst_weights = BOOK_SELECTOR.get_weighted_book_move(board)
-                
-                if suggested_book_move:
-                    # Store the suggested move and weights to influence search
-                    self.book_move_selected = suggested_book_move
-                    self.pst_adjustment_weights = pst_weights
-                    print(f"DEBUG: Book position found, biasing evaluation toward: {suggested_book_move}")
-                    
-                    # DO NOT directly return the book move - always search
-                    # This ensures we still check tactics and don't blindly follow book
-                else:
-                    print("DEBUG: No book moves found for this position")
-                    self.book_move_selected = None
-                    self.pst_adjustment_weights = {}
-                    
-            except Exception as e:
-                import traceback
-                print(f"DEBUG: Book move selection error: {e}")
-                traceback.print_exc()
-                self.pst_adjustment_weights = {}
+                # DO NOT directly return the book move - always search
+                # This ensures we still check tactics and don't blindly follow book
+            else:
+                print("DEBUG: No book moves found for this position")
                 self.book_move_selected = None
-            
-            # Check for immediate win conditions first - king captures and atomic bomb
-            opponent_king_square = None
-            for sq, piece in board.piece_map().items():
-                if piece.piece_type == chess.KING and piece.color != board.turn:
-                    opponent_king_square = sq
-                    break
-                    
-            if opponent_king_square:
-                # 1. Direct king capture
-                for move in board.legal_moves:
-                    if move.to_square == opponent_king_square:
-                        print("Found immediate checkmate (king capture)!")
-                        return move  # Return king capture immediately
+                self.pst_adjustment_weights = {}
                 
-                # 2. Atomic bomb win condition
-                opponent_color = not board.turn
-                opponent_drawback = board.get_active_drawback(opponent_color)
-                
-                if opponent_drawback == "atomic_bomb":
-                    # Find winning moves that capture pieces adjacent to king
-                    king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
-                    for file_offset in [-1, 0, 1]:
-                        for rank_offset in [-1, 0, 1]:
-                            if file_offset == 0 and rank_offset == 0:
-                                continue  # Skip the king's own square
-                                
-                            adj_file = king_file + file_offset
-                            adj_rank = king_rank + rank_offset
-                            
-                            if 0 <= adj_file <= 7 and 0 <= adj_rank <= 7:
-                                adj_square = chess.square(adj_file, adj_rank)
-                                piece_at_adj = board.piece_at(adj_square)
-                                
-                                # If there's an opponent piece adjacent to their king
-                                if piece_at_adj and piece_at_adj.color == opponent_color:
-                                    # Find capturing moves
-                                    for move in board.legal_moves:
-                                        if move.to_square == adj_square:
-                                            print("Found atomic bomb win condition!")
-                                            return move  # Return winning move immediately
-            
-            # Check for drawback-related loss conditions first
-            active_drawback = board.get_active_drawback(board.turn)
-            if active_drawback:
-                # Check if we have any legal moves with this drawback
-                legal_moves = list(board.legal_moves)
-                if not legal_moves:
-                    print("WARNING: AI has no legal moves due to drawback restrictions")
-                    return None  # No legal moves = loss
-                    
-                # Check for specific loss conditions
-                from GameState.drawback_manager import get_drawback_loss_function
-                loss_function = get_drawback_loss_function(active_drawback)
-                if loss_function and loss_function(board, board.turn):
-                    print(f"WARNING: AI detected it would lose due to drawback '{active_drawback}'")
-                    # If we're going to lose, pick a random move as a last resort
-                    return random.choice(legal_moves)
-            
-            # Check if the position is already a variant loss
-            if board.is_variant_loss():
-                print("WARNING: AI is already in a losing position")
-                # Pick a random move if we're already lost
-                legal_moves = list(board.legal_moves)
-                if legal_moves:
-                    return random.choice(legal_moves)
-                return None
-            
-            start_time = time.time()
-            best_move = None
-            
-            # Iterative deepening
-            for d in range(1, depth + 1):
-                print(f"Searching at depth {d}...")
-                try:
-                    # Aspiration window
-                    alpha = -MATE_UPPER
-                    beta = MATE_UPPER
-                    score = self.negamax(board, d, alpha, beta, start_time=start_time, time_limit=time_limit)
-                    
-                    # Get the best move from the TT
-                    key = (board.fen(), d)
-                    if key in self.tt and self.tt[key].move:
-                        best_move = self.tt[key].move
-                        
-                    # Print info
-                    print(f"Depth: {d}, Score: {score}, Nodes: {self.nodes}, Best move: {best_move}")
-                except TimeoutError:
-                    print(f"Time limit reached at depth {d}")
-                    break
-                except Exception as e:
-                    import traceback
-                    print(f"Error at depth {d}: {str(e)}")
-                    print(traceback.format_exc())
-                    # Don't break - continue to next depth
-                
-                # Check if we're out of time
-                elapsed = time.time() - start_time
-                if elapsed >= time_limit:
-                    print(f"Time limit reached: {elapsed:.2f}s")
-                    break
-            
-            # Need a minimum result or we're in trouble
-            if best_move is None:
-                print("Warning: No best move found! Selecting safest available move...")
-                moves = list(board.legal_moves)
-                # Try to find a reasonable move
-                if moves:
-                    # For the first few moves, strongly bias toward center control
-                    if len(board.move_stack) < 5:
-                        # Try central pawn moves first
-                        central_pawn_moves = []
-                        for m in moves:
-                            from_piece = board.piece_at(m.from_square)
-                            if from_piece and from_piece.piece_type == chess.PAWN:
-                                from_file = chess.square_file(m.from_square)
-                                to_file = chess.square_file(m.to_square)
-                                # Prioritize d and e pawns
-                                if from_file in [3, 4] and to_file in [3, 4]:
-                                    central_pawn_moves.append(m)
-                        
-                        if central_pawn_moves:
-                            best_move = random.choice(central_pawn_moves)
-                            return best_move
-                    
-                    # Otherwise, just pick a random move
-                    best_move = random.choice(moves)
-                print(f"Selected fallback move: {best_move}")
-                
-            return best_move
         except Exception as e:
             import traceback
-            print(f"CRITICAL ERROR in search function: {str(e)}")
-            print(traceback.format_exc())
-            # Last-resort fallback - pick any legal move
-            moves = list(board.legal_moves)
-            if moves:
-                fallback_move = random.choice(moves)
-                print(f"Emergency fallback move: {fallback_move}")
-                return fallback_move
-            return None
-
-# Simplified interface function
-def best_move(board, depth, time_limit=5):
-    """For use as the main AI interface"""
-    try:
-        # Track active drawback for debugging
-        active_drawback = board.get_active_drawback(board.turn)
-        if active_drawback:
-            print(f"AI searching with active drawback: {active_drawback}")
-            
-            # Verify legal moves are available with the drawback
-            legal_moves = list(board.legal_moves)
-            print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
-            
-            # If we have very few legal moves, print them all for debugging
-            if len(legal_moves) < 10:
-                print("All legal moves available:")
-                for i, m in enumerate(legal_moves):
-                    print(f"  {i+1}. {m.uci()}")
-            
-            # If no legal moves, return None immediately
-            if not legal_moves:
-                print("WARNING: No legal moves available with this drawback!")
-                return None
-                
-            # If only one legal move, return it immediately
-            if len(legal_moves) == 1:
-                print("Only one legal move available - returning it directly")
-                return legal_moves[0]
+            print(f"DEBUG: Book move selection error: {e}")
+            traceback.print_exc()
+            self.pst_adjustment_weights = {}
+            self.book_move_selected = None
         
-        # Check for immediate win moves before starting the search
-        # 1. King captures
+        # Check for immediate win conditions first - king captures and atomic bomb
         opponent_king_square = None
         for sq, piece in board.piece_map().items():
             if piece.piece_type == chess.KING and piece.color != board.turn:
@@ -629,55 +500,155 @@ def best_move(board, depth, time_limit=5):
                 break
                 
         if opponent_king_square:
+            # 1. Direct king capture
             for move in board.legal_moves:
                 if move.to_square == opponent_king_square:
-                    print("DIRECT WIN: Found immediate king capture!")
-                    return move
-                    
+                    print("Found immediate win (king capture)!")
+                    return move  # Return king capture immediately
+                
             # 2. Atomic bomb win condition
             opponent_color = not board.turn
             opponent_drawback = board.get_active_drawback(opponent_color)
             
             if opponent_drawback == "atomic_bomb":
+                # Find winning moves that capture pieces adjacent to king
                 king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
-                
-                for move in board.legal_moves:
-                    target = board.piece_at(move.to_square)
-                    if target and target.color == opponent_color:
-                        target_file = chess.square_file(move.to_square)
-                        target_rank = chess.square_rank(move.to_square)
+                for file_offset in [-1, 0, 1]:
+                    for rank_offset in [-1, 0, 1]:
+                        if file_offset == 0 and rank_offset == 0:
+                            continue  # Skip the king's own square
+                                
+                        adj_file = king_file + file_offset
+                        adj_rank = king_rank + rank_offset
                         
-                        # If capturing a piece adjacent to opponent's king
-                        if abs(target_file - king_file) <= 1 and abs(target_rank - king_rank) <= 1:
-                            print("ATOMIC BOMB WIN: Found winning capture near opponent's king!")
-                            return move
+                        if 0 <= adj_file <= 7 and 0 <= adj_rank <= 7:
+                            adj_square = chess.square(adj_file, adj_rank)
+                            piece_at_adj = board.piece_at(adj_square)
+                            
+                            # If there's an opponent piece adjacent to their king
+                            if piece_at_adj and piece_at_adj.color == opponent_color:
+                                # Find capturing moves
+                                for move in board.legal_moves:
+                                    if move.to_square == adj_square:
+                                        print("Found atomic bomb win condition!")
+                                        return move  # Return winning move immediately
         
-        engine = DrawbackSunfish()
+        # Check for drawback-related loss conditions first
+        active_drawback = board.get_active_drawback(board.turn)
+        if active_drawback:
+            # Check if we have any legal moves with this drawback
+            legal_moves = list(board.legal_moves)
+            if not legal_moves:
+                print("WARNING: AI has no legal moves due to drawback restrictions")
+                return None  # No legal moves = loss
+                
+            # Check for specific loss conditions
+            from GameState.drawback_manager import get_drawback_loss_function
+            loss_function = get_drawback_loss_function(active_drawback)
+            if loss_function and loss_function(board, board.turn):
+                print(f"WARNING: AI detected it would lose due to drawback '{active_drawback}'")
+                # If we're going to lose, pick a random move as a last resort
+                return random.choice(legal_moves)
         
-        # Mark the board as being in a search to avoid triggering loss conditions during evaluation
-        board_copy = board.copy()
-        if hasattr(board_copy, "_in_search"):
-            board_copy._in_search = True
-        else:
-            setattr(board_copy, "_in_search", True)
-            
-        result = engine.search(board_copy, depth, time_limit)
-        
-        # Verify the returned move is actually legal
-        if result and result not in board.legal_moves:
-            print(f"WARNING: AI returned illegal move {result}! Falling back to random move.")
+        # Check if the position is already a variant loss
+        if board.is_variant_loss():
+            print("WARNING: AI is already in a losing position")
+            # Pick a random move if we're already lost
             legal_moves = list(board.legal_moves)
             if legal_moves:
                 return random.choice(legal_moves)
             return None
+        
+        start_time = time.time()
+        best_move = None
+        
+        # Iterative deepening
+        for d in range(1, depth + 1):
+            print(f"Searching at depth {d}...")
+            try:
+                # Aspiration window
+                alpha = -MATE_UPPER
+                beta = MATE_UPPER
+                score = self.negamax(board, d, alpha, beta, start_time=start_time, time_limit=time_limit)
+                
+                # Get the best move from the TT
+                key = (board.fen(), d)
+                if key in self.tt and self.tt[key].move:
+                    best_move = self.tt[key].move
+                    
+                # Print info
+                print(f"Depth: {d}, Score: {score}, Nodes: {self.nodes}, Best move: {best_move}")
+            except TimeoutError:
+                print(f"Time limit reached at depth {d}")
+                break
+            except Exception as e:
+                import traceback
+                print(f"Error at depth {d}: {str(e)}")
+                print(traceback.format_exc())
+                # Don't break - continue to next depth
             
-        return result
+            # Check if we're out of time
+            elapsed = time.time() - start_time
+            if elapsed >= time_limit:
+                print(f"Time limit reached: {elapsed:.2f}s")
+                break
+        
+        # Need a minimum result or we're in trouble
+        if best_move is None:
+            print("Warning: No best move found! Selecting safest available move...")
+            moves = list(board.legal_moves)
+            # Try to find a reasonable move
+            if moves:
+                # For the first few moves, strongly bias toward center control
+                if len(board.move_stack) < 5:
+                    # Try central pawn moves first
+                    central_pawn_moves = []
+                    for m in moves:
+                        from_piece = board.piece_at(m.from_square)
+                        if from_piece and from_piece.piece_type == chess.PAWN:
+                            from_file = chess.square_file(m.from_square)
+                            to_file = chess.square_file(m.to_square)
+                            # Prioritize d and e pawns
+                            if from_file in [3, 4] and to_file in [3, 4]:
+                                central_pawn_moves.append(m)
+                    
+                    if central_pawn_moves:
+                        best_move = random.choice(central_pawn_moves)
+                        return best_move
+                
+                # Otherwise, just pick a random move
+                best_move = random.choice(moves)
+            print(f"Selected fallback move: {best_move}")
+            
+        return best_move
+
+# Simplified interface function
+def best_move(board, depth, time_limit=5, book_move_bonuses=None):
+    """
+    Find the best move for the given position
+    
+    Args:
+        board: Chess board position
+        depth: Search depth
+        time_limit: Time limit in seconds
+        book_move_bonuses: Dictionary of book moves with their bonus values in centipawns
+        
+    Returns:
+        Best move found by the engine
+    """
+    # Internal search function implementation
+    try:
+        engine = DrawbackSunfish()
+        return engine.search(board, depth, time_limit, book_move_bonuses)
     except Exception as e:
         import traceback
-        print(f"ENGINE ERROR: {str(e)}")
-        print(traceback.print_exc())
-        # Emergency fallback
-        moves = list(board.legal_moves)
-        if moves:
-            return random.choice(moves)
+        print(f"CRITICAL ENGINE ERROR: {str(e)}")
+        traceback.print_exc()
+        # Return any legal move in case of error
+        try:
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                return legal_moves[0]  # First legal move
+        except:
+            pass
         return None
