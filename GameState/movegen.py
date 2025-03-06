@@ -19,6 +19,8 @@ class DrawbackBoard(chess.Board):
         self._white_drawback = white_drawback
         self._black_drawback = black_drawback
         self._in_search = False  # Flag to indicate when we're in a search context
+        self._last_moved_piece = None
+        self._last_capture_square = None
 
     def reset(self, fen: str = chess.STARTING_FEN) -> None:
         """Reset the board to the starting position"""
@@ -169,6 +171,21 @@ class DrawbackBoard(chess.Board):
         2. You have no legal moves due to drawback restrictions
         3. A drawback-specific loss condition is met
         """
+        # Skip this check during AI search to improve performance
+        if self._in_search:
+            # Only do basic king capture check during search
+            white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
+                                 for p in self.piece_map().values())
+            black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
+                                 for p in self.piece_map().values())
+                             
+            if not white_king_alive and self.turn == chess.WHITE:
+                return True  # White's king captured, white loses
+            if not black_king_alive and self.turn == chess.BLACK:
+                return True  # Black's king captured, black loses
+                
+            return False
+                                 
         # First directly check for king capture without using is_variant_end
         white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
                              for p in self.piece_map().values())
@@ -183,14 +200,16 @@ class DrawbackBoard(chess.Board):
         # Check for drawback loss conditions directly
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
+            # Import here to avoid circular imports
+            from GameState.drawback_manager import get_drawback_loss_function
+            
             loss_function = get_drawback_loss_function(active_drawback)
             if loss_function and loss_function(self, self.turn):
                 return True  # Explicit loss condition triggered
             
             # Check for legal moves directly without recursion
-            pseudo_moves = list(super().generate_pseudo_legal_moves())
             has_legal_moves = False
-            for move in pseudo_moves:
+            for move in super().generate_pseudo_legal_moves():
                 if not self._is_drawback_illegal(move, self.turn):
                     has_legal_moves = True
                     break
@@ -323,3 +342,36 @@ class DrawbackBoard(chess.Board):
                     black_king_found = True
         
         return not (white_king_found and black_king_found)
+
+    def push(self, move: chess.Move) -> None:
+        """
+        Enhanced push that tracks additional information needed for drawbacks.
+        This method extends the standard push to track additional state.
+        """
+        # Track information before making the move
+        moving_piece = self.piece_at(move.from_square)
+        target_piece = self.piece_at(move.to_square)
+        is_capture = target_piece is not None
+        
+        # Execute the move using the parent method
+        super().push(move)
+        
+        # Store the last moved piece and capture information
+        self._last_moved_piece = moving_piece
+        if is_capture:
+            self._last_capture_square = move.to_square
+        else:
+            self._last_capture_square = None
+            
+    def pop(self) -> chess.Move:
+        """
+        Enhanced pop that clears the tracked move information.
+        """
+        # Execute standard pop
+        result = super().pop()
+        
+        # Clear the tracked information
+        self._last_moved_piece = None
+        self._last_capture_square = None
+        
+        return result

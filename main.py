@@ -14,23 +14,24 @@ from utils import WIDTH, HEIGHT, BOARD_HEIGHT, BOARD_Y_OFFSET, BOARD_X_OFFSET, D
 # Import game logic
 from GameState.movegen import DrawbackBoard
 from GameState.drawback_manager import DRAWBACKS as AVAILABLE_DRAWBACKS
+from GameState.drawback_manager import get_drawback_loss_function
 
 # Import global settings
 from Globals import (
-    FPS, AI_DEPTH, WHITE_AI, BLACK_AI, DRAWBACKS, TIME_LIMIT,  # Add TIME_LIMIT here
+    FPS, AI_DEPTH, WHITE_AI, BLACK_AI, DRAWBACKS, TIME_LIMIT,
     GAME_OVER, WINNER_COLOR, FLIPPED_BOARD, AI_MOVE_COOLDOWN, SEARCH_IN_PROGRESS,
     TINKER_BUTTON_WIDTH, TINKER_BUTTON_HEIGHT, TINKER_BUTTON_TOP, TINKER_BUTTON_COLOR,
     TEXT_COLOR_WHITE, TEXT_COLOR_BLACK, HIGHLIGHT_COLOR, GOLD_COLOR, STATUS_BG_COLOR
 )
 
-# Use the enhanced async engine instead of the old one
+# Use the enhanced async engine
 from AI.enhanced_async_engine import (
     start_search, get_result, is_search_complete, 
     reset_search, get_progress
 )
 
-# Import engine core utilities for position analysis
-from AI.engine_core import analyze_position
+# Import engine core utilities for position analysis and drawback checking
+from AI.engine_core import analyze_position, check_drawback_loss_conditions
 
 # UI panel setup
 try:
@@ -210,6 +211,51 @@ def display_ai_status(screen, board):
     screen.blit(status_surf, status_rect)
     screen.blit(thinking_surf, thinking_rect)
 
+def check_game_end_conditions(board):
+    """
+    Check if the game has ended due to a variety of conditions:
+    - King capture
+    - Drawback loss condition
+    - No legal moves
+    
+    Returns:
+        tuple: (game_over, winner_color, message)
+    """
+    # Check if a king has been captured (standard variant end)
+    white_king_alive = False
+    black_king_alive = False
+    
+    for square, piece in board.piece_map().items():
+        if piece.piece_type == chess.KING:
+            if piece.color == chess.WHITE:
+                white_king_alive = True
+            else:
+                black_king_alive = True
+                
+            # Early exit if both kings found
+            if white_king_alive and black_king_alive:
+                break
+    
+    # Handle king capture
+    if not white_king_alive:
+        return True, chess.BLACK, "White's king was captured"
+        
+    if not black_king_alive:
+        return True, chess.WHITE, "Black's king was captured"
+    
+    # Check for drawback-specific loss conditions (like atomic bomb)
+    has_loss, losing_color, reason = check_drawback_loss_conditions(board)
+    if has_loss:
+        return True, chess.WHITE if losing_color == chess.BLACK else chess.BLACK, reason
+    
+    # Check for no legal moves
+    legal_moves = list(board.legal_moves)
+    if not legal_moves:
+        return True, chess.WHITE if board.turn == chess.BLACK else chess.BLACK, f"No legal moves for {'Black' if board.turn == chess.BLACK else 'White'}"
+    
+    # Game not over
+    return False, None, None
+
 def handle_ai_turn(board):
     """
     Non-blocking AI turn handler that starts a search if needed,
@@ -221,22 +267,12 @@ def handle_ai_turn(board):
     if not HAS_AI or game_over or ai_move_cooldown > 0:
         return
     
-    # Check variant end directly without using is_variant_end() to avoid recursion
-    white_king_alive = False
-    black_king_alive = False
-    
-    # Use piece_map() instead of _board which doesn't exist
-    for square, piece in board.piece_map().items():
-        if piece.piece_type == chess.KING:
-            if piece.color == chess.WHITE:
-                white_king_alive = True
-            else:
-                black_king_alive = True
-    
-    if not white_king_alive or not black_king_alive:
-        game_over = True
-        winner_color = chess.WHITE if not black_king_alive else chess.BLACK
-        print(f"Game over! {'White' if winner_color == chess.WHITE else 'Black'} wins by capturing the king!")
+    # First check if the game is already over
+    game_over, winner_color, end_message = check_game_end_conditions(board)
+    if game_over:
+        print(f"Game over: {end_message}")
+        search_in_progress = False
+        reset_search()  # Make sure to clean up any pending search
         return
     
     # If AI's turn and no search is in progress, start one
@@ -295,8 +331,8 @@ def handle_ai_turn(board):
             # No good move found, pick a random legal move
             legal_moves = list(board.legal_moves)
             if legal_moves:
-                move = random.choice(legal_moves)
-                print(f"Selected random move: {move}")
+                move = legal_moves[0]  # Use first legal move instead of random for determinism
+                print(f"Selected fallback move: {move}")
             else:
                 print("No legal moves available - game should be over")
                 game_over = True
@@ -307,10 +343,19 @@ def handle_ai_turn(board):
         try:
             board.push(move)
             print(f"Move applied: {move}")
+            
+            # Check for game end conditions AFTER the move is applied
+            game_over, winner_color, end_message = check_game_end_conditions(board)
+            if game_over:
+                print(f"Game over after AI move: {end_message}")
+                return
+                
             # Set cooldown to prevent AI from moving again immediately
             ai_move_cooldown = AI_MOVE_COOLDOWN
         except Exception as e:
             print(f"Error applying move: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
 def undo_last_move(board):
     """Safely undo the last move on the board and update game state"""
@@ -424,10 +469,10 @@ async def async_main():
                                 print(f"Human moved: {move_obj}")
                                 selected_square = None
                                 
-                                # Check if game is over
-                                if board.is_variant_end():
-                                    winner_color = chess.WHITE if board.is_variant_win() else chess.BLACK
-                                    game_over = True
+                                # Check for game end conditions AFTER the move is applied
+                                game_over, winner_color, end_message = check_game_end_conditions(board)
+                                if game_over:
+                                    print(f"Game over after human move: {end_message}")
                             else:
                                 # If illegal move, check if clicking a new piece
                                 piece = board.piece_at(clicked_square)

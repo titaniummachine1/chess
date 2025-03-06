@@ -97,6 +97,31 @@ The AI includes special handling for Drawback Chess mechanics:
 - **King Capture Detection**: Immediate recognition of king capture possibilities
 - **Variant Loss Detection**: Recognition of special drawback-related loss conditions
 - **Mobility Adjustments**: Enhanced evaluation of move options under drawback restrictions
+- **Special Win Conditions**: Direct detection of winning conditions from drawbacks (like Atomic Bomb)
+
+## Refactored Architecture
+
+The AI system has been refactored to improve:
+
+1. **Simplified Structure**:
+   - Removed redundant files and code paths
+   - Centralized core functionality in `engine_core.py`
+   - Single async engine implementation in `enhanced_async_engine.py`
+
+2. **Drawback Handling**:
+   - Proper tracking of captures for drawback conditions
+   - Explicit optimization for Atomic Bomb drawback
+   - Performance improvements by skipping expensive calculations during search
+
+3. **Error Resilience**:
+   - Better error handling throughout the codebase
+   - Fallback moves when optimal paths fail
+   - Deterministic fallback choices for reproducibility
+
+4. **Code Quality**:
+   - Reduced code duplication
+   - Improved documentation and comments
+   - Better function boundaries and separation of concerns
 
 ## Usage Pattern
 
@@ -117,6 +142,10 @@ if player_turn == AI_COLOR:
         move = get_result()
         if move:
             board.push(move)
+            
+            # Always check for game end conditions after a move
+            game_over, winner_color, end_message = check_game_end_conditions(board)
+            
         search_in_progress = False
         reset_search()
     else:

@@ -14,6 +14,7 @@ from AI.drawback_sunfish import best_move as sunfish_best_move
 from AI.ai_utils import get_king_capture_move, MATE_LOWER, MATE_UPPER, MAX_DEPTH
 from AI.book_handler import BookMoveSelector
 from AI.evaluation import evaluate_position
+from GameState.drawback_manager import get_drawback_loss_function
 
 # Cache structures
 EngineResult = namedtuple('EngineResult', 'move score pv nodes time')
@@ -78,6 +79,41 @@ def analyze_position(board, include_stats=False):
         advancement_moves=advancement_moves
     )
 
+def check_drawback_loss_conditions(board):
+    """
+    Check if the current position has a loss condition based on active drawbacks.
+    
+    Args:
+        board: DrawbackBoard position
+        
+    Returns:
+        tuple: (has_loss, losing_color, reason) where:
+            - has_loss: True if a loss condition is detected
+            - losing_color: The color that lost (None if no loss)
+            - reason: A string describing the loss reason (None if no loss)
+    """
+    # Check both colors for potential loss conditions
+    for color in [chess.WHITE, chess.BLACK]:
+        # Get the active drawback for this color
+        drawback = board.get_active_drawback(color)
+        if not drawback:
+            continue
+            
+        # Get the loss condition function for this drawback
+        loss_func = get_drawback_loss_function(drawback)
+        if not loss_func:
+            continue
+            
+        # Check if the loss condition is met
+        try:
+            if loss_func(board, color):
+                return (True, color, f"{drawback} loss condition triggered")
+        except Exception as e:
+            print(f"Error checking loss condition for {drawback}: {e}")
+    
+    # No loss conditions detected
+    return (False, None, None)
+
 def select_best_move(board, depth=3, time_limit=1.0):
     """
     Select the best move using the engine and book.
@@ -93,47 +129,95 @@ def select_best_move(board, depth=3, time_limit=1.0):
     """
     start_time = time.time()
     
-    # Always check for direct king captures first (unique to Drawback Chess)
-    king_capture = get_king_capture_move(board)
-    if king_capture:
+    # Mark board as being in search context to skip slow checks during search
+    board._in_search = True
+    
+    try:
+        # Always check for direct king captures first (unique to Drawback Chess)
+        king_capture = get_king_capture_move(board)
+        if king_capture:
+            return EngineResult(
+                move=king_capture,
+                score=MATE_UPPER,
+                pv=[king_capture],
+                nodes=1,
+                time=time.time() - start_time
+            )
+        
+        # Check for Atomic Bomb win - capturing piece adjacent to opponent king
+        # This is a special optimization to prioritize winning moves
+        opponent_color = not board.turn
+        opponent_drawback = board.get_active_drawback(opponent_color)
+        
+        if opponent_drawback == "atomic_bomb":
+            # Find opponent king
+            king_square = None
+            for square, piece in board.piece_map().items():
+                if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                    king_square = square
+                    break
+                    
+            # If king found, look for adjacent capture opportunities
+            if king_square:
+                # Get adjacent squares
+                king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                for r_delta in [-1, 0, 1]:
+                    for f_delta in [-1, 0, 1]:
+                        if r_delta == 0 and f_delta == 0:
+                            continue  # Skip king's own square
+                            
+                        adj_file, adj_rank = king_file + f_delta, king_rank + r_delta
+                        if 0 <= adj_file < 8 and 0 <= adj_rank < 8:
+                            adj_square = chess.square(adj_file, adj_rank)
+                            
+                            # Check if there's an opponent piece here
+                            adj_piece = board.piece_at(adj_square)
+                            if adj_piece and adj_piece.color == opponent_color:
+                                # Look for moves that capture this piece
+                                for move in board.legal_moves:
+                                    if move.to_square == adj_square:
+                                        print(f"Found atomic bomb win: {move}")
+                                        return EngineResult(
+                                            move=move,
+                                            score=MATE_UPPER - 1,
+                                            pv=[move],
+                                            nodes=1,
+                                            time=time.time() - start_time
+                                        )
+        
+        # Try to get a book move
+        book_move, _ = book_selector.get_weighted_book_move(board)
+        if book_move:
+            return EngineResult(
+                move=book_move,
+                score=100,  # Arbitrary positive score for book moves
+                pv=[book_move],
+                nodes=0,
+                time=time.time() - start_time
+            )
+        
+        # Fall back to engine search
+        move = sunfish_best_move(board, depth, time_limit)
+        
+        # Calculate elapsed time
+        elapsed = time.time() - start_time
+        
+        # Ensure we have a move, even if engine failed
+        if not move and len(list(board.legal_moves)) > 0:
+            # Fallback to first legal move (better than random for determinism)
+            stats = analyze_position(board)
+            move = stats.legal_moves[0] if stats.legal_moves else None
+        
         return EngineResult(
-            move=king_capture,
-            score=MATE_UPPER,
-            pv=[king_capture],
-            nodes=1,
-            time=time.time() - start_time
+            move=move,
+            score=0,  # We don't have the score from sunfish here
+            pv=[move] if move else [],
+            nodes=0,  # We don't have node count
+            time=elapsed
         )
-    
-    # Try to get a book move
-    book_move, _ = book_selector.get_weighted_book_move(board)
-    if book_move:
-        return EngineResult(
-            move=book_move,
-            score=100,  # Arbitrary positive score for book moves
-            pv=[book_move],
-            nodes=0,
-            time=time.time() - start_time
-        )
-    
-    # Fall back to engine search
-    move = sunfish_best_move(board, depth, time_limit)
-    
-    # Calculate elapsed time
-    elapsed = time.time() - start_time
-    
-    # Ensure we have a move, even if engine failed
-    if not move and len(list(board.legal_moves)) > 0:
-        # Fallback to random move
-        stats = analyze_position(board)
-        move = stats.legal_moves[0] if stats.legal_moves else None
-    
-    return EngineResult(
-        move=move,
-        score=0,  # We don't have the score from sunfish here
-        pv=[move] if move else [],
-        nodes=0,  # We don't have node count
-        time=elapsed
-    )
+    finally:
+        # Always clear the search flag when done
+        board._in_search = False
 
 def evaluate_current_position(board, include_drawback_effects=True):
     """

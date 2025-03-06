@@ -51,21 +51,29 @@ def check_explosion_loss(board, color):
     if len(board.move_stack) == 0:
         return False
     
-    # Get the last move
+    # Get the last move and see if it was a capture
     last_move = board.move_stack[-1]
     
-    # Only trigger when the opponent just made the move
-    # Current turn should be the player we're checking for loss
+    # Only trigger when opponent just made a capture
+    # Current turn should be the player we're checking for loss,
     # which means the last move was made by the opponent
     if board.turn != color:
         return False
+        
+    # Check if we have the capture square tracked (this is a safer approach)
+    last_capture_square = None
+    if hasattr(board, "_last_capture_square") and board._last_capture_square is not None:
+        last_capture_square = board._last_capture_square
+    else:
+        # Fallback: Check if the last move was a capture by checking its flags
+        if board.is_capture(last_move):
+            last_capture_square = last_move.to_square
     
-    # Check if the last move was a capture by checking the move history
-    was_capture = board.is_irreversible(last_move)
-    if not was_capture:
+    # If no capture happened, no explosion
+    if last_capture_square is None:
         return False
     
-    # Find the king for the current color
+    # Find our king
     king_square = None
     for square, piece in board.piece_map().items():
         if piece and piece.piece_type == chess.KING and piece.color == color:
@@ -77,14 +85,18 @@ def check_explosion_loss(board, color):
         return False
     
     # Check if the capture square is adjacent to the king
-    capture_square = last_move.to_square
     king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
-    capture_file = chess.square_file(capture_square)
-    capture_rank = chess.square_rank(capture_square)
+    capture_file = chess.square_file(last_capture_square)
+    capture_rank = chess.square_rank(last_capture_square)
+    
+    # Print debug info for atomic bomb check
+    print(f"Atomic Bomb Check: King at {chess.square_name(king_square)}, capture at {chess.square_name(last_capture_square)}")
+    print(f"Distance: file={abs(king_file - capture_file)}, rank={abs(king_rank - capture_rank)}")
     
     # If the file and rank differences are at most 1, they're adjacent
     if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
-        if king_square != capture_square:  # Make sure we're not checking the king's own square
+        if king_square != last_capture_square:  # Make sure we're not checking the king's own square
+            print(f"ATOMIC BOMB TRIGGERED! Capture at {chess.square_name(last_capture_square)} adjacent to king at {chess.square_name(king_square)}")
             return True  # Loss condition triggered
     
     return False
