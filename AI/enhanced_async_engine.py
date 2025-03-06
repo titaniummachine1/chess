@@ -25,6 +25,8 @@ class AsyncEngineState:
         self.start_time = None
         self.depth = 0
         self.time_limit = 0
+        self.last_best_move = None  # Track the last best move for comparison
+        self.current_best_move = None  # Current best move
         
     def reset(self):
         """Reset the engine state completely"""
@@ -33,6 +35,8 @@ class AsyncEngineState:
         self.start_time = None
         self.depth = 0
         self.time_limit = 0
+        self.last_best_move = None
+        self.current_best_move = None
 
 # Create a singleton instance
 engine_state = AsyncEngineState()
@@ -85,6 +89,8 @@ async def async_search(board, depth, time_limit=5, smart_time_management=False):
     engine_state.start_time = time.time()
     engine_state.depth = depth
     engine_state.time_limit = time_limit
+    engine_state.last_best_move = None
+    engine_state.current_best_move = None
     
     # Create a partial function with the search parameters
     search_func = partial(run_search, 
@@ -190,14 +196,30 @@ def get_result():
     # If search is complete, return the result
     if engine_state.current_result is not None:
         return engine_state.current_result
+    
+    # Check if there's a partial result available from drawback_Bot
+    try:
+        from AI.drawback_Bot import current_best_move, current_best_score
+        
+        # See if we have a current best move
+        if current_best_move is not None:
+            # If we have a move, check if it's different from the last one we saw
+            move_str = current_best_move.uci() if current_best_move else None
+            
+            if move_str and move_str != engine_state.last_best_move:
+                print(f"New best move found in search: {move_str}, resetting search timer")
+                # New best move found, update our tracking and reset the timer
+                engine_state.last_best_move = move_str
+                engine_state.start_time = time.time()  # Reset the timer!
+    except (ImportError, AttributeError):
+        # If we can't access the current best move, just continue
+        pass
         
     # If search has exceeded time limit, force termination
-    # For smart time management, use a higher multiplier as search time can be extended
-    timeout_multiplier = 2.5  # Higher multiplier to account for smart time management extending search
     if (engine_state.current_search and 
         engine_state.start_time and 
         engine_state.time_limit > 0 and
-        time.time() - engine_state.start_time >= engine_state.time_limit * timeout_multiplier):
+        time.time() - engine_state.start_time >= engine_state.time_limit):
         
         # Try to cancel the search
         if not engine_state.current_search.done():

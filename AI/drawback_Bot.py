@@ -22,6 +22,10 @@ except ImportError:
 
 from AI.ai_utils import MATE_LOWER, MATE_UPPER, MAX_DEPTH, BOOK_MOVE_BONUS, BOOK_MOVE_BONUS_REGULAR
 
+# Global variables to track current best move and score
+current_best_move = None
+current_best_score = None
+
 class DrawbackBot:
     """Custom chess engine designed specifically for Drawback Chess rules"""
     
@@ -121,6 +125,8 @@ class DrawbackBot:
         Returns:
             Tuple of (score, best_move)
         """
+        global current_best_move, current_best_score
+        
         # Reset node counter
         self.nodes = 0
         
@@ -134,6 +140,10 @@ class DrawbackBot:
         best_move = None
         best_score = -MATE_UPPER
         start_overall = time.time()
+        
+        # Reset global tracking variables
+        current_best_move = None
+        current_best_score = None
         
         # Smart time management variables
         last_best_move = None
@@ -207,7 +217,7 @@ class DrawbackBot:
                         continue
                 
                 # Get the best move from the transposition table
-                current_best_move = None
+                current_best_move_local = None
                 
                 # Look for the best move in the tt
                 pos_key = self.get_position_key(board)
@@ -218,7 +228,7 @@ class DrawbackBot:
                         entry_move_uci = entry.move
                         for legal_move in board.legal_moves:
                             if legal_move.uci() == entry_move_uci:
-                                current_best_move = legal_move
+                                current_best_move_local = legal_move
                                 break
                 
                 # Calculate search time for this iteration
@@ -226,32 +236,42 @@ class DrawbackBot:
                 total_elapsed = time.time() - start_overall
                 
                 # Update best move and score
-                if current_best_move:
+                if current_best_move_local:
                     # Smart time management: Check if move has changed and reset time if needed
                     if use_smart_time_management and current_depth >= 3:
-                        if current_best_move == last_best_move:
+                        if current_best_move_local == last_best_move:
                             # Move is stable from previous iteration
                             if stable_move_start_time is None:
                                 # First time this move is stable
                                 stable_move_start_time = time.time()
-                                print(f"Found stable move: {current_best_move.uci()}, starting stability clock")
+                                print(f"Found stable move: {current_best_move_local.uci()}, starting stability clock")
                             else:
                                 # Move has been stable for a while
                                 stable_duration = time.time() - stable_move_start_time
                                 if stable_duration >= stable_move_threshold:
-                                    print(f"Best move {current_best_move.uci()} has been stable for {stable_duration:.2f}s, early termination")
+                                    print(f"Best move {current_best_move_local.uci()} has been stable for {stable_duration:.2f}s, early termination")
                                     break
                         else:
                             # Move changed, reset stability timer and extend search time by resetting start_overall
                             stable_move_start_time = None
                             if last_best_move is not None:  # Only if we had a previous best move
-                                print(f"New best move found: {current_best_move.uci()}, extending search time")
+                                print(f"New best move found: {current_best_move_local.uci()}, extending search time")
                                 start_overall = time.time()  # Reset the overall time to extend search
+                                
+                                # Update global tracking variables for external access
+                                global current_best_move, current_best_score
+                                current_best_move = current_best_move_local
+                                current_best_score = score
                     
                     # Remember this move for stability tracking
-                    last_best_move = current_best_move
-                    best_move = current_best_move
+                    last_best_move = current_best_move_local
+                    best_move = current_best_move_local
                     best_score = score
+                    
+                    # Update global tracking variables for external access
+                    global current_best_move, current_best_score
+                    current_best_move = best_move
+                    current_best_score = best_score
                     
                     # Report progress
                     print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {best_move.uci()}, Time: {elapsed:.2f}s")
