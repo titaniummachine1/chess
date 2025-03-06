@@ -230,8 +230,35 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         score = 0
         move_uci = move.uci()
         
+        # Check for immediate variant win moves (highest priority)
+        board.push(move)
+        is_variant_win = board.is_variant_win() if hasattr(board, 'is_variant_win') else False
+        
+        # Check for drawback-specific winning moves
+        is_drawback_win = False
+        is_no_legal_moves = False
+        
+        if hasattr(board, 'get_active_drawback') and hasattr(board, 'check_drawback_win'):
+            active_drawback = board.get_active_drawback(not board.turn)  # Check opponent's drawback
+            if active_drawback:
+                is_drawback_win = board.check_drawback_win(not board.turn, active_drawback)
+                
+                # Check if opponent has any legal moves with their drawback
+                if not is_drawback_win:
+                    has_moves = any(True for _ in board.legal_moves)
+                    if not has_moves:
+                        is_no_legal_moves = True
+        
+        board.pop()
+        
+        if is_variant_win or is_drawback_win:
+            # Absolute highest priority: variant win
+            score = 20000000
+        elif is_no_legal_moves:
+            # High priority: opponent has no legal moves
+            score = 19000000
         # Highest priority for transposition table moves
-        if tt_move_uci and move_uci == tt_move_uci:
+        elif tt_move_uci and move_uci == tt_move_uci:
             score = 10000000
         # High priority for killer moves (good quiet moves found during search)
         elif move_uci in killer_move_ucis:
@@ -249,9 +276,9 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                 victim_value = PIECE_VALUES.get(victim_symbol, (100, 0))[0]
                 aggressor_value = PIECE_VALUES.get(aggressor_symbol, (100, 0))[0]
                 
-                # King captures are highest priority
+                # King captures are highest priority after variant wins
                 if victim.piece_type == chess.KING:
-                    score = 9500000
+                    score = 15000000
                 else:
                     # MVV-LVA formula: victim value - attacker value / 10
                     score = 8000000 + (victim_value * 100 - aggressor_value)
@@ -264,6 +291,9 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                 chess.KNIGHT: 300
             }
             score = 7000000 + promotion_value.get(move.promotion, 0)
+        # Check-giving moves have medium-high priority
+        elif board.gives_check(move):
+            score = 6500000
         # History heuristic for quiet moves
         else:
             history_score = bot.history.get((move.from_square, move.to_square), 0)
