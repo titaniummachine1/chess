@@ -420,16 +420,20 @@ class DrawbackBot:
         # Track the best move found
         best_move = None
         
+        # Track number of moves searched so far
+        num_searched = 0
+        
         # Go through all moves and search them
         for score, move in scored_moves:
-            # Update search progress
-            num_searched = 0
-            
             # Apply Late Move Reduction - search less deeply on low-priority moves
             if len(board.legal_moves) >= 4 and depth >= 3 and num_searched >= 2 and not board.is_capture(move):
+                # Create a copy of the board for LMR
+                lmr_board_copy = board.copy()
+                lmr_board_copy.push(move)
+                
                 # Reduce depth for moves searched later
                 reduced_depth = depth - 1
-                score = -self.negamax(board_copy, reduced_depth, -alpha-1, -alpha, ply+1, True, start_time, time_limit)
+                score = -self.negamax(lmr_board_copy, reduced_depth, -alpha-1, -alpha, ply+1, True, start_time, time_limit)
                 # Only do full-depth search if the reduced search returns a promising score
                 if score <= alpha:
                     continue  # Skip this move - failed low in reduced search
@@ -474,6 +478,7 @@ class DrawbackBot:
                     self.tt[pos] = Entry(score, MATE_UPPER, move)
                     return beta
                 
+                # Increment number of moves searched
                 num_searched += 1
             except Exception as e:
                 print(f"Error in negamax with move {move}: {str(e)}")
