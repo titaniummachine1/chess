@@ -1,6 +1,13 @@
 """
-Drawback manager - handles loading and managing drawback rules
-Using functional programming principles with proper assertions
+Drawback Manager - handles loading and managing drawback rules
+
+The Drawback Manager loads all drawback modules from the 'drawbacks' directory
+and provides functions to access them. Each drawback has:
+
+1. A 'check_move' function that determines if a move is legal
+2. An optional 'loss_condition' function that can trigger a variant loss
+
+Drawbacks are loaded dynamically at runtime and stored in the DRAWBACKS dictionary.
 """
 import importlib
 import os
@@ -14,7 +21,16 @@ from typing import Dict, Any, Callable, Optional, Union, List
 DRAWBACKS: Dict[str, Dict[str, Any]] = {}
 
 def validate_drawback_info(info: Dict[str, Any], name: str) -> None:
-    """Validate that the drawback info has all required fields"""
+    """
+    Validate that the drawback info has all required fields
+    
+    Each drawback must define a DRAWBACK_INFO dictionary with:
+    - name: Display name of the drawback
+    - description: Text description of what it does
+    - check_move: Name of the function that checks move legality
+    - supported: Boolean flag indicating if it's fully implemented
+    - loss_condition: (Optional) Name of function that checks for loss
+    """
     assert isinstance(info, dict), f"DRAWBACK_INFO for {name} must be a dictionary"
     assert "description" in info, f"DRAWBACK_INFO for {name} must have a description"
     assert "check_move" in info, f"DRAWBACK_INFO for {name} must have a check_move function name"
@@ -102,11 +118,53 @@ def set_default_params() -> None:
         if name in DRAWBACKS and "params" not in DRAWBACKS[name]:
             DRAWBACKS[name]["params"] = config
 
-def get_drawback_info(drawback_name: str) -> Dict[str, Any]:
+def get_drawback_function(drawback_name: str) -> Optional[Callable]:
     """
-    Retrieves the drawback rules based on the given drawback name.
+    Get the check_move function for a drawback
+    
+    The check_move function determines if a move is legal according to the drawback.
+    It should return True if the move is ILLEGAL, False if the move is legal.
+    
+    Args:
+        drawback_name: Name of the drawback
+        
+    Returns:
+        The check_move function or None if not found
     """
-    return DRAWBACKS.get(drawback_name, {})
+    if drawback_name not in DRAWBACKS:
+        return None
+        
+    return DRAWBACKS[drawback_name].get("check_function")
+    
+def get_drawback_loss_function(drawback_name: str) -> Optional[Callable]:
+    """
+    Get the loss_condition function for a drawback
+    
+    The loss_condition function determines if a player has lost due to the drawback.
+    It should return True if the loss condition is met, False otherwise.
+    
+    Args:
+        drawback_name: Name of the drawback
+        
+    Returns:
+        The loss_condition function or None if not found
+    """
+    if drawback_name not in DRAWBACKS:
+        return None
+        
+    return DRAWBACKS[drawback_name].get("loss_function")
+    
+def get_drawback_info(drawback_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Get information about a drawback
+    
+    Args:
+        drawback_name: Name of the drawback
+        
+    Returns:
+        Dictionary with drawback information or None if not found
+    """
+    return DRAWBACKS.get(drawback_name)
 
 def get_drawback_params(drawback_name: str) -> Optional[Dict[str, Any]]:
     """Get the configurable parameters for a drawback"""
@@ -130,45 +188,6 @@ def update_drawback_params(drawback_name: str, new_params: Dict[str, Any]) -> bo
         DRAWBACKS[drawback_name]["params"] = current_params
         return True
     return False
-
-def get_drawback_function(drawback_name: str) -> Optional[Callable]:
-    """Get the check function for a drawback directly"""
-    if not drawback_name or drawback_name not in DRAWBACKS:
-        return None
-        
-    drawback = DRAWBACKS[drawback_name]
-    if not drawback.get("supported", False):
-        return None
-    
-    # First check if we have direct function reference (preferred method)
-    if "check_function" in drawback:
-        return drawback["check_function"]
-        
-    # Raise an exception if no function is found
-    func_name = drawback.get("check_move")
-    if not func_name:
-        raise AssertionError(f"Drawback '{drawback_name}' has no check_move function name specified")
-    
-    raise AssertionError(f"No implementation found for {drawback_name}.{func_name}")
-
-def get_drawback_loss_function(drawback_name: str) -> Optional[Callable]:
-    """Get the loss condition function for a drawback directly"""
-    if not drawback_name or drawback_name not in DRAWBACKS:
-        return None
-        
-    drawback = DRAWBACKS[drawback_name]
-    
-    # First check if we have direct function reference (preferred method)
-    if "loss_function" in drawback:
-        return drawback["loss_function"]
-        
-    # If no loss condition is specified, that's ok - return None
-    func_name = drawback.get("loss_condition")
-    if not func_name:
-        return None
-    
-    # If a loss condition is specified but not found, that's an error
-    raise AssertionError(f"Loss function {func_name} specified but not found for {drawback_name}")
 
 def ensure_drawbacks_package() -> None:
     """Ensure the Drawbacks directory has an __init__.py file"""

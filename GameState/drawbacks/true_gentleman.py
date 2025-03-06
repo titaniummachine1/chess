@@ -11,17 +11,24 @@ DRAWBACK_INFO = {
 }
 
 def check_true_gentleman(board, move, color):
-    """Check if a move follows the true gentleman rule"""
+    """
+    Check if a move follows the true gentleman rule
     
-    # Only check capturing moves
-    if not board.is_capture(move):
-        return True
+    Args:
+        board: The current board state
+        move: The move to check
+        color: The color making the move
         
+    Returns:
+        True if the move is ILLEGAL (can't capture queen)
+        False if the move is legal
+    """
     # Get target piece
     target_piece = board.piece_at(move.to_square)
     
-    # Check if target is a queen
+    # Check if this is a capture of a queen
     if target_piece and target_piece.piece_type == chess.QUEEN:
-        return False  # Can't capture queens
+        return True  # Move is ILLEGAL - can't capture queens
         
-    return True  # Legal move
+    # All other moves are legal
+    return False
