@@ -115,7 +115,7 @@ class DrawbackBot:
             board: Current position
             depth: Search depth
             time_limit: Optional time limit in seconds
-            use_smart_time_management: If True, yield early if best move is stable
+            use_smart_time_management: If True, reset time counter when new best move is found
             
         Returns:
             Tuple of (score, best_move)
@@ -134,10 +134,9 @@ class DrawbackBot:
         best_score = -MATE_UPPER
         start_overall = time.time()
         
-        # Smart time management variables
+        # Smart time management variable - track the last best move
         last_best_move = None
-        stable_move_start_time = None
-        stable_move_threshold = 10.0  # Seconds to wait before accepting a stable move
+        last_best_move_time = time.time()  # Track when we last found a new best move
         
         # Set initial depth attribute for move_value function
         self.depth = 0  # Start at 0, will be updated in the loop
@@ -155,15 +154,26 @@ class DrawbackBot:
                 
                 start_time = time.time()
                 
-                # More generous time allocation - allow using up to 95% of time limit
+                # Check if we've exceeded the time limit but only if smart time management is OFF
+                # or if we've exceeded the time limit with no new best move
                 elapsed_overall = time.time() - start_overall
-                if elapsed_overall > time_limit * 0.95:  # Use 95% of time limit as cutoff
-                    print(f"Time limit approaching after depth {current_depth-1}, stopping search")
-                    break
+                elapsed_since_new_move = time.time() - last_best_move_time
+                
+                if not use_smart_time_management:
+                    # Normal time management - just check overall elapsed time
+                    if elapsed_overall > time_limit * 0.95:
+                        print(f"Time limit approaching after depth {current_depth-1}, stopping search")
+                        break
+                else:
+                    # Smart time management - check time since last new best move
+                    if elapsed_since_new_move > time_limit * 0.95:
+                        print(f"No new best move found for {elapsed_since_new_move:.2f}s, stopping search")
+                        break
+                    else:
+                        print(f"Smart time: {elapsed_since_new_move:.2f}s since last new best move (limit: {time_limit:.2f}s)")
                     
-                # Calculate remaining time for this depth - allow more time for deeper depths
-                # Give at least 25% of remaining time to the current depth
-                remaining_time = max(0.2, time_limit - elapsed_overall)
+                # Calculate remaining time for this depth
+                remaining_time = max(0.2, time_limit - (elapsed_since_new_move if use_smart_time_management else elapsed_overall))
                 time_for_depth = max(remaining_time * 0.25, 0.2)
                 
                 # Use aspiration windows for deeper searches
@@ -179,7 +189,10 @@ class DrawbackBot:
                         # If score outside window, re-search with full window
                         if score <= alpha or score >= beta:
                             # Check time limit again before researching
-                            if time.time() - start_overall > time_limit * 0.98:
+                            if time.time() - last_best_move_time > time_limit * 0.98 and use_smart_time_management:
+                                print(f"Time limit nearly reached during aspiration window retry at depth {current_depth}")
+                                break
+                            elif time.time() - start_overall > time_limit * 0.98 and not use_smart_time_management:
                                 print(f"Time limit nearly reached during aspiration window retry at depth {current_depth}")
                                 break
                                 
@@ -226,43 +239,29 @@ class DrawbackBot:
                 
                 # Update best move and score
                 if current_best_move:
+                    # Check if this is a new best move
+                    new_best_move = False
+                    if best_move is None or current_best_move != best_move:
+                        new_best_move = True
+                        
                     best_move = current_best_move
                     best_score = score
                     
-                    # Smart time management: Check if move has been stable
-                    if use_smart_time_management and current_depth >= 3:
-                        if current_best_move == last_best_move:
-                            # Move is stable from previous iteration
-                            if stable_move_start_time is None:
-                                # First time this move is stable
-                                stable_move_start_time = time.time()
-                                print(f"Found stable move: {current_best_move.uci()}, starting stability clock")
-                            else:
-                                # Move has been stable for a while
-                                stable_duration = time.time() - stable_move_start_time
-                                if stable_duration >= stable_move_threshold:
-                                    print(f"Best move {current_best_move.uci()} has been stable for {stable_duration:.2f}s, early termination")
-                                    break
-                        else:
-                            # Move changed, reset stability timer
-                            stable_move_start_time = None
-                    
-                    # Remember this move for stability tracking
-                    last_best_move = current_best_move
-                    
+                    # Smart time management: Reset timer when a new best move is found
+                    if use_smart_time_management and new_best_move:
+                        old_time = last_best_move_time
+                        last_best_move_time = time.time()
+                        elapsed_since_reset = last_best_move_time - old_time
+                        print(f"Found new best move: {best_move.uci()} - Resetting smart time counter after {elapsed_since_reset:.2f}s")
+                        
                     # Report progress
                     print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {best_move.uci()}, Time: {elapsed:.2f}s")
                 
                 # Check if we've completed the max depth
                 if current_depth == depth:
                     print(f"Search completed in {total_elapsed:.2f}s, final best move: {best_move.uci()}")
-                
-                # If using smart time management and we've reached a sufficient depth,
-                # consider stopping if time is nearly up
-                if use_smart_time_management and current_depth >= 4:
-                    if total_elapsed > time_limit * 0.80:
-                        print(f"Using smart time management to stop at depth {current_depth} after {total_elapsed:.2f}s")
-                        break
+                    break
+                    
         except Exception as e:
             print(f"Fatal error in search: {e}")
             import traceback

@@ -139,7 +139,7 @@ class TinkerPanel:
         # Smart time management checkbox
         smart_time_y = self.add_center_element(checkbox_height)
         self.smart_time_checkbox = Checkbox(
-            self.width/2 - 120, smart_time_y, 15, "Smart Time Management", font=self.small_font
+            self.width/2 - 120, smart_time_y, 15, "Smart Time (Reset timer on new best moves)", font=self.small_font
         )
         self.smart_time_checkbox.checked = self.ai_settings.get("SMART_TIME_MANAGEMENT", False)
         

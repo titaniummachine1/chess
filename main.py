@@ -26,7 +26,7 @@ from Globals import (
 )
 
 # Add smart time management setting (default to False)
-USE_SMART_TIME_MANAGEMENT = True
+USE_SMART_TIME_MANAGEMENT = False
 
 # Use the enhanced async engine
 from AI.enhanced_async_engine import (
@@ -329,7 +329,7 @@ def handle_ai_turn(board):
         start_search(board, search_depth, search_time_limit, USE_SMART_TIME_MANAGEMENT)
         search_in_progress = True
         return
-    
+        
     # If a search is complete, apply the move
     if search_in_progress and is_search_complete():
         # Get the move from the engine
@@ -340,27 +340,28 @@ def handle_ai_turn(board):
         search_in_progress = False
         reset_search()
         
-        # Extract the move from the result
+        # Convert the result to a chess.Move object
         move = None
+        
         if result:
             if isinstance(result, dict) and 'move' in result:
-                # Result is a dictionary with a 'move' key (from newer async engine)
+                # Result is a dictionary with move in UCI format
                 move_uci = result['move']
                 if move_uci:
-                    # Convert UCI string to Move object
+                    # Convert the UCI string to a Move object
                     for legal_move in board.legal_moves:
                         if legal_move.uci() == move_uci:
                             move = legal_move
                             break
-            else:
-                # Result is directly a Move object (from older engine versions)
+            elif hasattr(result, 'from_square') and hasattr(result, 'to_square'):
+                # Result is already a chess.Move object
                 move = result
         
-        # If no move found, try to pick the first legal move as fallback
+        # If no move found, try to pick a legal move as fallback
         if not move:
             legal_moves = list(board.legal_moves)
             if legal_moves:
-                move = legal_moves[0]
+                move = legal_moves[0]  # Pick first legal move as fallback
                 print(f"Selected fallback move: {move}")
             else:
                 print("No legal moves available - game should be over")
