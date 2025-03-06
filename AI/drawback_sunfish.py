@@ -55,8 +55,33 @@ class DrawbackSunfish:
         return regular_eval + mobility_bonus
         
     def quiescence(self, board, alpha, beta, depth=0, max_depth=5):
-        """Quiescence search to only evaluate quiet positions"""
+        """
+        Enhanced quiescence search that handles both captures and potential checkmates.
+        Extends search dynamically when promising checkmate patterns are detected.
+        """
         self.nodes += 1
+        
+        # Check for direct checkmate opportunity (king capture in Drawback Chess)
+        opponent_king_square = None
+        for sq, piece in board.piece_map().items():
+            if piece.piece_type == chess.KING and piece.color != board.turn:
+                opponent_king_square = sq
+                break
+                
+        if opponent_king_square:
+            for move in board.legal_moves:
+                if move.to_square == opponent_king_square:
+                    # Found checkmate (king capture)!
+                    return MATE_UPPER - depth
+        
+        # Check for draws and stalemates (no legal moves)
+        if not any(True for _ in board.legal_moves):
+            # This is a draw in standard chess, but in Drawback Chess could be a win or loss
+            if board.is_variant_loss():
+                return -MATE_UPPER + depth
+            return 0  # Draw
+        
+        # Static evaluation
         stand_pat = self.evaluate_position(board)
         
         # Stand pat cutoff
@@ -65,34 +90,70 @@ class DrawbackSunfish:
         if alpha < stand_pat:
             alpha = stand_pat
             
-        # Maximum depth check
+        # Maximum normal depth check
         if depth >= max_depth:
-            return alpha
-            
-        # Generate and filter only captures
-        captures = []
+            # Even at max depth, if the stand_pat score is high, look a bit deeper
+            # for potential checkmates to avoid horizon effect on winning positions
+            if stand_pat < MATE_LOWER and stand_pat > 500:
+                # Only extend depth for promising positions
+                pass
+            else:
+                return alpha
+        
+        # Generate tactical moves (captures and checks)
+        tactical_moves = []
+        
+        # First, add captures with MVV-LVA scoring
         for move in board.legal_moves:
+            score = 0
+            is_tactical = False
+            
+            # Score captures
             if board.is_capture(move):
-                # Score captures by MVV-LVA
+                is_tactical = True
                 target = board.piece_at(move.to_square)
                 attacker = board.piece_at(move.from_square)
-                if target and attacker:  # Make sure pieces exist
+                if target and attacker:
                     target_symbol = target.symbol().upper()
                     attacker_symbol = attacker.symbol().upper()
                     target_value = PIECE_VALUES.get(target_symbol, (0, 0))[0]
                     attacker_value = PIECE_VALUES.get(attacker_symbol, (0, 0))[0]
                     score = target_value - attacker_value/10
-                    captures.append((score, move))
+            
+            # Check for checks - look deeper at these
+            if not is_tactical:
+                board_copy = board.copy()
+                try:
+                    board_copy.push(move)
+                    # In standard chess we'd check is_check(), but in Drawback Chess
+                    # we need to check manually for pieces attacking the king
+                    king_square = None
+                    for sq, piece in board_copy.piece_map().items():
+                        if piece.piece_type == chess.KING and piece.color == board.turn:
+                            king_square = sq
+                            break
+                    
+                    # If the move gives check, it's a tactical move worth exploring
+                    if king_square:
+                        attackers = board_copy.attackers(not board.turn, king_square)
+                        if attackers:
+                            is_tactical = True
+                            score = 10  # Base score for checks
+                except Exception:
+                    continue  # Skip problematic moves
+            
+            # Add tactical moves to our search list
+            if is_tactical:
+                tactical_moves.append((score, move))
         
-        # FIXED: Sort captures by score using key parameter
-        captures.sort(key=lambda x: x[0], reverse=True)
+        # Sort moves: captures by score, checks after
+        tactical_moves.sort(key=lambda x: x[0], reverse=True)
         
-        # Search captures
-        for _, move in captures:
+        # Search tactical moves
+        for _, move in tactical_moves:
             try:
-                # Skip bad captures in late quiescence
-                if depth > 0:
-                    # Skip capturing with higher value piece
+                # Skip bad captures in late quiescence unless they're checks
+                if depth > 0 and board.is_capture(move):
                     victim = board.piece_at(move.to_square)
                     aggressor = board.piece_at(move.from_square)
                     if victim and aggressor:
@@ -100,12 +161,38 @@ class DrawbackSunfish:
                         aggressor_symbol = aggressor.symbol().upper()
                         victim_value = PIECE_VALUES.get(victim_symbol, (0, 0))[0]
                         aggressor_value = PIECE_VALUES.get(aggressor_symbol, (0, 0))[0]
-                        if aggressor_value > victim_value + 50:
+                        
+                        # Skip obviously bad trades but still investigate checks
+                        if aggressor_value > victim_value + 200:
                             continue  # Skip obviously bad captures
                 
                 board_copy = board.copy()
                 board_copy.push(move)
-                score = -self.quiescence(board_copy, -beta, -alpha, depth + 1, max_depth)
+                
+                # Check if we've won after this move
+                if board_copy.is_variant_win():
+                    return MATE_UPPER - depth - 1
+                
+                # Extend search depth for promising positions even beyond max_depth
+                current_max_depth = max_depth
+                if depth >= max_depth - 1:
+                    # Check if our move created a very promising position
+                    # such as king in danger or piece hanging
+                    king_in_danger = False
+                    for sq, piece in board_copy.piece_map().items():
+                        if piece.piece_type == chess.KING and piece.color != board.turn:
+                            attackers = board_copy.attackers(board.turn, sq)
+                            if attackers:
+                                king_in_danger = True
+                                break
+                    
+                    # Extend depth for dangerous positions
+                    if king_in_danger:
+                        current_max_depth = max_depth + 2
+                else:
+                    current_max_depth = max_depth
+                
+                score = -self.quiescence(board_copy, -beta, -alpha, depth + 1, current_max_depth)
                 
                 if score >= beta:
                     return beta
@@ -187,8 +274,21 @@ class DrawbackSunfish:
             
         # Check for checkmate/stalemate/variant end
         if depth == 0 or board.is_variant_end():
-            return self.quiescence(board, alpha, beta)
+            # Enhanced transition to quiescence search
+            # Check for immediate checkmate or stalemate before going to quiescence
+            if not any(True for _ in board.legal_moves):
+                if board.is_variant_loss():
+                    return -MATE_UPPER + ply
+                return 0  # Draw
+                
+            # Add additional parameter to quiescence to indicate a promising position
+            # This helps quiescence search know when to look deeper for checkmates
+            score_estimate = self.evaluate_position(board)
+            is_promising = score_estimate > 300 or score_estimate < -300
             
+            # Pass extra hint to quiescence about promising positions
+            return self.quiescence(board, alpha, beta, 0, 5 + (1 if is_promising else 0))
+        
         # Null move pruning
         if depth > 2 and null_ok and not board.is_check():
             # Try a null move to see if we can get a beta cutoff
@@ -200,119 +300,67 @@ class DrawbackSunfish:
         
         # Get all legal moves
         legal_moves = list(board.legal_moves)
-        # First shuffle moves randomly for variety
-        random.shuffle(legal_moves)
         
-        # Move ordering - score moves after shuffling
+        # Move ordering: Prioritize tactically powerful moves
         scored_moves = []
         
-        # Get book moves for this position - avoid circular imports
-        try:
-            from AI.book_parser import OPENING_BOOK
-            
-            # Get book moves for this position
-            book_move_list = OPENING_BOOK.get_book_moves(board)
-            book_move_dict = {move: weight for move, weight in book_move_list}
-            
-            # Use the pre-selected random book move from the search function
-            random_book_move = getattr(self, 'random_book_move', None)
-            
-        except (ImportError, Exception) as e:
-            print(f"Book move error: {e}")
-            book_move_dict = {}
-            random_book_move = None
-        
-        # Check if book moves are legal with current drawbacks
-        legal_move_set = set(legal_moves)  # Convert to set for faster lookups
-        
+        # Track potential king threats for improved move ordering
+        opponent_king_square = None
+        for sq, piece in board.piece_map().items():
+            if piece.piece_type == chess.KING and piece.color != board.turn:
+                opponent_king_square = sq
+                break
+                
         for move in legal_moves:
+            # Start with base score
             score = 0
             
-            # Random selected book move gets highest priority
-            if move == random_book_move:
-                score = 30000000  # Much higher priority than other book moves
-            # Other book moves still get good priority
-            elif move in book_move_dict:
-                weight = book_move_dict[move]
-                score = 5000000 + (weight * 1000)
-            
-            # TT move gets high priority
-            if tt_entry and move == tt_entry.move:
-                score = 10000000
+            # 1. Check for transposition table hits
+            if tt_entry and tt_entry.move == move:
+                score += 10000  # Highest priority for TT moves
                 
-            # King captures get highest priority
-            if opponent_king_square and move.to_square == opponent_king_square:
-                score = 20000000
-            
-            # In opening game, prioritize central pawn moves for BOTH colors
-            if len(board.move_stack) < 15:  
-                from_piece = board.piece_at(move.from_square)
-                if from_piece:
-                    # Central pawn advances get a bonus
-                    if from_piece.piece_type == chess.PAWN:
-                        from_file = chess.square_file(move.from_square)
-                        from_rank = chess.square_rank(move.from_square)
-                        to_file = chess.square_file(move.to_square)
-                        to_rank = chess.square_rank(move.to_square)
-                        
-                        # Common logic for both colors - central pawn moves
-                        if from_file in [3, 4]:  # d or e file
-                            # 2-square advance in opening gets huge bonus
-                            if abs(from_rank - to_rank) == 2:
-                                score += 1000000
-                            else:
-                                score += 800000
-                        elif from_file in [2, 5]:  # c or f file
-                            score += 600000
-                    
-                    # SEVERELY penalize knight moves if central pawns haven't moved
-                    if from_piece.piece_type == chess.KNIGHT:
-                        # Check if central pawns have moved based on color
-                        if from_piece.color == chess.WHITE:
-                            d_pawn_moved = board.piece_at(chess.D2) is None
-                            e_pawn_moved = board.piece_at(chess.E2) is None
-                            if not d_pawn_moved and not e_pawn_moved:
-                                score -= 700000  # Huge penalty!
-                        else:  # Black
-                            d_pawn_moved = board.piece_at(chess.D7) is None
-                            e_pawn_moved = board.piece_at(chess.E7) is None
-                            if not d_pawn_moved and not e_pawn_moved:
-                                score -= 700000  # Huge penalty!
-                        
-                        # Edge penalties
-                        to_file = chess.square_file(move.to_square)
-                        if to_file == 0 or to_file == 7:  # Knight to a or h file
-                            score -= 500000
-            
-            # Capture scoring
+            # 2. Check for captures (MVV-LVA)
             if board.is_capture(move):
-                victim = board.piece_at(move.to_square)
+                target = board.piece_at(move.to_square)
                 attacker = board.piece_at(move.from_square)
-                if victim and attacker:
-                    victim_symbol = victim.symbol().upper()
-                    attacker_symbol = attacker.symbol().upper()
-                    victim_value = PIECE_VALUES.get(victim_symbol, (0, 0))[0]
-                    attacker_value = PIECE_VALUES.get(attacker_symbol, (0, 0))[0]
-                    # MVV-LVA scoring
-                    capture_score = victim_value * 100 - attacker_value
-                    score += 1000000 + capture_score
+                if target and attacker:
+                    # Most Valuable Victim - Least Valuable Attacker
+                    t_symbol = target.symbol().upper()
+                    a_symbol = attacker.symbol().upper()
+                    t_value = PIECE_VALUES.get(t_symbol, (0, 0))[0]
+                    a_value = PIECE_VALUES.get(a_symbol, (0, 0))[0]
+                    score += t_value * 10 - a_value
+                    
+            # 3. Check for moves that attack the opponent's king area
+            if opponent_king_square:
+                # Prioritize moves that attack squares near the opponent's king
+                king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
+                to_file, to_rank = chess.square_file(move.to_square), chess.square_rank(move.to_square)
+                
+                # Calculate king distance
+                file_dist = abs(king_file - to_file)
+                rank_dist = abs(king_rank - to_rank)
+                
+                # Closer moves to king get higher priority
+                if file_dist <= 1 and rank_dist <= 1:
+                    # Adjacent to king
+                    score += 300
+                elif file_dist <= 2 and rank_dist <= 2:
+                    # Close to king
+                    score += 200
             
-            # Checks get priority
-            if board.gives_check(move):
-                score += 500000
+            # 4. Check for killer moves at this depth
+            if self.killers[ply][0] == move or self.killers[ply][1] == move:
+                score += 900  # Below TT moves but above most captures
             
-            # Killer moves
-            if move == self.killers[ply][0]:
-                score += 90000
-            elif move == self.killers[ply][1]:
-                score += 80000
+            # 5. Check for history heuristic
+            move_key = (move.from_square, move.to_square)
+            score += self.history.get(move_key, 0)
             
-            # History heuristic
-            score += self.history.get((board.turn, move.from_square, move.to_square), 0)
-            
+            # Add to scored moves list
             scored_moves.append((score, move))
         
-        # Sort all moves by score
+        # Sort moves by score, higher first
         scored_moves.sort(key=lambda x: x[0], reverse=True)
         
         # Variables to track best move and score
