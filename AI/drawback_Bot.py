@@ -116,6 +116,7 @@ class DrawbackBot:
             depth: Search depth
             time_limit: Optional time limit in seconds
             use_smart_time_management: If True, yield early if best move is stable
+                and reset time when a new best move is found
             
         Returns:
             Tuple of (score, best_move)
@@ -226,10 +227,7 @@ class DrawbackBot:
                 
                 # Update best move and score
                 if current_best_move:
-                    best_move = current_best_move
-                    best_score = score
-                    
-                    # Smart time management: Check if move has been stable
+                    # Smart time management: Check if move has changed and reset time if needed
                     if use_smart_time_management and current_depth >= 3:
                         if current_best_move == last_best_move:
                             # Move is stable from previous iteration
@@ -244,11 +242,16 @@ class DrawbackBot:
                                     print(f"Best move {current_best_move.uci()} has been stable for {stable_duration:.2f}s, early termination")
                                     break
                         else:
-                            # Move changed, reset stability timer
+                            # Move changed, reset stability timer and extend search time by resetting start_overall
                             stable_move_start_time = None
+                            if last_best_move is not None:  # Only if we had a previous best move
+                                print(f"New best move found: {current_best_move.uci()}, extending search time")
+                                start_overall = time.time()  # Reset the overall time to extend search
                     
                     # Remember this move for stability tracking
                     last_best_move = current_best_move
+                    best_move = current_best_move
+                    best_score = score
                     
                     # Report progress
                     print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {best_move.uci()}, Time: {elapsed:.2f}s")
