@@ -156,7 +156,7 @@ def select_best_move(board, depth=3, time_limit=1.0):
             # There are book moves, but we'll let the search make the final decision
             print(f"Found {len(book_move_bonuses)} legal book moves for this position")
             if special_move:
-                print(f"Special book move: {special_move} (gets 30cp bonus)")
+                print(f"Special book move: {special_move} (gets 50cp bonus)")
                 
             # Run the search with book move information
             # We let the search make the decision rather than returning the book move directly

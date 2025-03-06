@@ -88,18 +88,37 @@ class BookMoveSelector:
         special_move = None
         if moves:
             special_move = random.choices(moves, weights=probs, k=1)[0]
-            print(f"BOOK DEBUG: Special move selected: {special_move} (gets 30cp bonus)")
+            print(f"BOOK DEBUG: Special move selected: {special_move} (gets 50cp bonus)")
             
-        # Prepare bonus values for all book moves - standard 25cp (0.25 pawns)
-        # Special move gets 30cp (0.30 pawns)
+        # Prepare bonus values for book moves - scaled by move frequency
         book_move_bonuses = {}
-        for move in moves:
-            # Standard book move bonus: 25cp
-            book_move_bonuses[move] = 25
+        
+        # First calculate the max frequency to normalize
+        max_freq = max([freq for _, freq in book_moves]) if book_moves else 1
+        
+        for move, freq in book_moves:
+            # Scale the bonus based on frequency (25-40cp range)
+            # More frequent moves get higher bonuses
+            frequency_ratio = freq / max_freq
+            scaled_bonus = 25 + int(15 * frequency_ratio)
+            book_move_bonuses[move] = scaled_bonus
             
-        # The special move gets an extra 5cp (30cp total)
+        # The special move gets an extra bonus (50cp total)
         if special_move:
-            book_move_bonuses[special_move] = 30
+            book_move_bonuses[special_move] = 50
+            
+        # Top 3 most frequent moves get an additional boost
+        if len(book_moves) > 1:
+            # Sort by frequency
+            sorted_moves = sorted(book_moves, key=lambda x: x[1], reverse=True)
+            # Top move gets +10cp
+            if len(sorted_moves) >= 1:
+                top_move = sorted_moves[0][0]
+                book_move_bonuses[top_move] = book_move_bonuses.get(top_move, 25) + 10
+            # Second move gets +5cp
+            if len(sorted_moves) >= 2:
+                second_move = sorted_moves[1][0]
+                book_move_bonuses[second_move] = book_move_bonuses.get(second_move, 25) + 5
             
         # Choose a suggested move based on probabilities
         suggested_move = None
