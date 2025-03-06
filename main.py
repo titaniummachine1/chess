@@ -262,7 +262,7 @@ def check_game_end_conditions(board):
 
 def handle_ai_turn(board):
     """Handle the AI's turn to move, using the configured engine"""
-    global game_over, winner_color, search_in_progress
+    global game_over, winner_color, search_in_progress, USE_SMART_TIME_MANAGEMENT
     
     # Only proceed if this is AI's turn and not already searching
     if search_in_progress:
