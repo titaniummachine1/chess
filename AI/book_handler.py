@@ -33,6 +33,25 @@ class BookMoveSelector:
         import time
         random.seed(time.time() + hash(board.fen()) % 1000)
         
+        # Check for drawbacks which might affect move selection
+        active_drawback = None
+        if hasattr(board, 'get_active_drawback'):
+            active_drawback = board.get_active_drawback(board.turn)
+            
+        # Filter legal moves considering drawbacks
+        legal_book_moves = []
+        for move, freq in book_moves:
+            if move in board.legal_moves:
+                legal_book_moves.append((move, freq))
+            else:
+                print(f"BOOK DEBUG: Move {move} is not legal with current drawback")
+        
+        # If no legal book moves remain after filtering
+        if not legal_book_moves:
+            return None, {}
+            
+        book_moves = legal_book_moves
+        
         # Calculate move weights based on frequency
         total_freq = sum(freq for _, freq in book_moves)
         if total_freq == 0:
@@ -43,6 +62,13 @@ class BookMoveSelector:
         for move, freq in book_moves:
             # Add random variation (+/- 20%) to each probability for more diversity
             random_factor = 0.8 + 0.4 * random.random()  # 0.8 to 1.2
+            
+            # Reduce probability further if there's an active drawback
+            if active_drawback:
+                # More randomness with drawbacks to avoid predictable patterns
+                drawback_factor = 0.6 + 0.8 * random.random()  # 0.6 to 1.4
+                random_factor *= drawback_factor
+                
             normalized_prob = ((freq + 1) / (total_freq + len(book_moves))) * random_factor
             move_probs[move] = normalized_prob
         

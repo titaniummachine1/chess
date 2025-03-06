@@ -69,8 +69,27 @@ def run_search(board, depth, time_limit=5):
         print("No legal moves available - game should be over")
         return None
     
+    # Apply a time adjustment based on game phase and complexity
+    adjusted_time_limit = time_limit
+    move_count = len(board.move_stack)
+    
+    # Give more time in the opening and less in the endgame
+    if move_count < 10:
+        # Early game
+        adjusted_time_limit = min(time_limit * 1.2, time_limit + 1.0)  # Max 20% more time or +1s
+        print(f"Early game - increasing time limit to {adjusted_time_limit:.2f}s")
+    elif move_count > 40:
+        # Late game
+        adjusted_time_limit = max(time_limit * 0.8, 1.0)  # Min 1 second
+        print(f"Late game - reducing time limit to {adjusted_time_limit:.2f}s")
+        
+    # Give more time for complex positions
+    if len(legal_moves) > 30:
+        adjusted_time_limit = min(adjusted_time_limit * 1.1, adjusted_time_limit + 0.5)
+        print(f"Complex position - slight time increase to {adjusted_time_limit:.2f}s")
+    
     # Call the unified engine to get best move
-    result = select_best_move(board_copy, depth, time_limit)
+    result = select_best_move(board_copy, depth, adjusted_time_limit)
     
     # Log search statistics
     elapsed = time.time() - start_time

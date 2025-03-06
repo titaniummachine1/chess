@@ -8,6 +8,7 @@ reducing duplication and making the code more maintainable.
 import time
 import chess
 from collections import namedtuple
+import random
 
 # Import engine components
 from AI.drawback_sunfish import best_move as sunfish_best_move
@@ -188,13 +189,31 @@ def select_best_move(board, depth=3, time_limit=1.0):
         # Try to get a book move
         book_move, _ = book_selector.get_weighted_book_move(board)
         if book_move:
-            return EngineResult(
-                move=book_move,
-                score=100,  # Arbitrary positive score for book moves
-                pv=[book_move],
-                nodes=0,
-                time=time.time() - start_time
-            )
+            # Check if the book move is legal with current drawbacks
+            if book_move in board.legal_moves:
+                # Force minimum thinking time for book moves too
+                elapsed = time.time() - start_time
+                min_think_time = max(0.5, time_limit * 0.25)  # At least 0.5s or 25% of time limit
+                
+                if elapsed < min_think_time:
+                    remaining = min_think_time - elapsed
+                    print(f"Waiting {remaining:.2f}s to simulate thinking on book move")
+                    time.sleep(remaining)
+                
+                # Add slight randomness to book move selection based on drawbacks
+                active_drawback = board.get_active_drawback(board.turn)
+                if active_drawback and random.random() < 0.3:  # 30% chance to ignore book move with drawback
+                    print(f"Ignoring book move due to active drawback: {active_drawback}")
+                else:
+                    return EngineResult(
+                        move=book_move,
+                        score=100,  # Arbitrary positive score for book moves
+                        pv=[book_move],
+                        nodes=0,
+                        time=time.time() - start_time
+                    )
+            else:
+                print(f"Book move {book_move} is not legal with current drawback")
         
         # Fall back to engine search
         move = sunfish_best_move(board, depth, time_limit)
