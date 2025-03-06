@@ -23,6 +23,7 @@ class AsyncEngineState:
         self.current_result = None
         self.search_executor = ThreadPoolExecutor(max_workers=1)
         self.start_time = None
+        self.original_start_time = None
         self.depth = 0
         self.time_limit = 0
         self.last_best_move = None  # Track the last best move for comparison
@@ -35,11 +36,14 @@ class AsyncEngineState:
         self.history_heuristic = {}  # Preserve history heuristic between moves
         self.principal_variation = []  # Store the principal variation
         
+        self.partial_result = None  # Partial result from search (best move so far)
+        
     def reset(self):
         """Reset the engine state completely but preserve search knowledge"""
         self.current_progress = "Idle"
         self.current_result = None
         self.start_time = None
+        self.original_start_time = None
         self.depth = 0
         self.time_limit = 0
         self.last_best_move = None
@@ -48,6 +52,8 @@ class AsyncEngineState:
         
         # Note: We do NOT reset transposition_table, killer_moves, history_heuristic, or principal_variation
         # This allows search knowledge to persist between moves
+        
+        self.partial_result = None
         
     def clear_search_knowledge(self):
         """Clear all accumulated search knowledge (use sparingly)"""
@@ -124,6 +130,7 @@ async def async_search(board, depth, time_limit=5, smart_time_management=False):
     global engine_state
     engine_state.current_progress = f"Thinking... analyzing position at depth {depth}"
     engine_state.start_time = time.time()
+    engine_state.original_start_time = engine_state.start_time  # Save original start time
     engine_state.depth = depth
     engine_state.time_limit = time_limit
     engine_state.last_best_move = None
@@ -187,6 +194,17 @@ def start_search(board, depth, time_limit=5, smart_time_management=False):
     if engine_state.current_search and not engine_state.current_search.done():
         return False
         
+    # Initialize search state
+    engine_state.start_time = time.time()
+    engine_state.original_start_time = engine_state.start_time  # Save original start time
+    engine_state.depth = depth
+    engine_state.time_limit = time_limit
+    engine_state.board = board
+    engine_state.current_result = None
+    engine_state.last_best_move = None
+    engine_state.partial_result = None
+    engine_state.current_progress = f"Starting search at depth {depth}..."
+        
     # Create and start the search task
     async def search_task():
         await async_search(board, depth, time_limit, smart_time_management)
@@ -204,6 +222,8 @@ def start_search(board, depth, time_limit=5, smart_time_management=False):
         engine_state.current_search = asyncio.create_task(search_task())
         return True
     except Exception as e:
+        print(f"Error starting search: {e}")
+        engine_state.current_progress = f"Failed to start search: {str(e)}"
         return False
 
 def get_progress():
@@ -246,9 +266,18 @@ def get_result():
             
             if move_str and move_str != engine_state.last_best_move:
                 print(f"New best move found in search: {move_str}, resetting search timer")
+                
                 # New best move found, update our tracking and reset the timer
                 engine_state.last_best_move = move_str
                 engine_state.start_time = time.time()  # Reset the timer!
+                
+                # Save as partial result to ensure we don't lose it on timeout
+                engine_state.partial_result = {
+                    'move': move_str,
+                    'time': time.time() - engine_state.original_start_time if engine_state.original_start_time else 0,
+                    'depth': engine_state.depth,
+                    'partial': True
+                }
                 return None  # Return None to indicate search is still in progress
     except (ImportError, AttributeError):
         # If we can't access the current best move, just continue
@@ -300,6 +329,24 @@ def get_result():
         except (ImportError, AttributeError):
             # If we can't access the current best move, continue with timeout
             pass
+            
+        # Check if we have a partial result saved
+        if engine_state.partial_result and 'move' in engine_state.partial_result:
+            print(f"Using partial result from search: {engine_state.partial_result['move']}")
+            partial_result = engine_state.partial_result
+            
+            # Try to cancel the search
+            if not engine_state.current_search.done():
+                engine_state.current_search.cancel()
+                
+            # Reset the engine state
+            engine_state.reset()
+            
+            # Add elapsed time to result
+            partial_result['time'] = time.time() - engine_state.original_start_time if engine_state.original_start_time else 0
+            partial_result['note'] = 'partial_result_on_timeout'
+            
+            return partial_result
         
         # Try to cancel the search
         if not engine_state.current_search.done():

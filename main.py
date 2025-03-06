@@ -261,88 +261,81 @@ def check_game_end_conditions(board):
     return False, None, None
 
 def handle_ai_turn(board):
-    """
-    Non-blocking AI turn handler that starts a search if needed,
-    or applies the move if search is complete
-    """
-    global game_over, winner_color, ai_move_cooldown, search_in_progress
+    """Handle the AI's turn to move, using the configured engine"""
+    global game_over, winner_color, search_in_progress
     
-    # Don't do anything if game is over or cooldown is active
-    if not HAS_AI or game_over or ai_move_cooldown > 0:
+    # Only proceed if this is AI's turn and not already searching
+    if search_in_progress:
         return
     
-    # First check if the game is already over
-    game_over, winner_color, end_message = check_game_end_conditions(board)
-    if game_over:
-        print(f"Game over: {end_message}")
+    # Get side to move and active drawback, if any
+    side_to_move = "White" if board.turn == chess.WHITE else "Black"
+    active_drawback = board.get_active_drawback(board.turn)
+    
+    # Display what drawback is active, if any
+    if active_drawback:
+        print(f"AI turn with active drawback: {active_drawback}")
+        
+        # Show some sample legal moves to help with debugging
+        legal_moves = list(board.legal_moves)
+        print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
+        if legal_moves:
+            print("Sample legal moves:")
+            for i, move in enumerate(legal_moves[:5]):
+                print(f"  {i+1}. {move}")
+    else:
+        print(f"AI turn with no drawback restrictions")
+        print(f"Legal moves: {len(list(board.legal_moves))}")
+    
+    # Get depth and time limit from settings
+    from AI.engine_settings import get_ai_settings
+    depth, time_limit, smart_time_management = get_ai_settings()
+    
+    # Initialize engine
+    from AI.enhanced_async_engine import engine_state, start_search, reset_search, get_result
+    
+    # Store the last seen best move for timeout recovery
+    last_seen_best_move = None
+    try:
+        from AI.drawback_Bot import current_best_move
+        if current_best_move:
+            last_seen_best_move = current_best_move.uci()
+    except (ImportError, AttributeError):
+        pass
+    
+    print(f"Starting AI search for {side_to_move} at depth {depth} with time limit {time_limit}s")
+    
+    # Ensure the engine state has the current board
+    engine_state.board = board
+    engine_state.depth = depth
+    engine_state.time_limit = time_limit
+    
+    # Set search in progress flag
+    search_in_progress = True
+    
+    # Start search
+    search_started = start_search(board, depth, time_limit, smart_time_management)
+    
+    if not search_started:
+        print("Failed to start search")
         search_in_progress = False
-        reset_search()  # Make sure to clean up any pending search
         return
     
-    # If AI's turn and no search is in progress, start one
-    if not search_in_progress:
-        # Check whose turn it is and if that player is AI-controlled
-        current_player_is_ai = (board.turn == chess.WHITE and WHITE_AI) or (board.turn == chess.BLACK and BLACK_AI)
+    # Wait a short time for search to initialize
+    import asyncio
+    yield from asyncio.sleep(0.1)
+    
+    # Get result if available
+    result = get_result()
+    
+    # If result already available, process it
+    if result:
+        search_in_progress = False
         
-        if not current_player_is_ai:
-            # Not AI's turn, do nothing
-            return
-            
-        # Get the current active drawback for this side
-        active_drawback = board.get_active_drawback(board.turn)
-        
-        # Use engine_core's analyze_position to safely check legal moves
+        # Apply the move
         try:
-            position_stats = analyze_position(board)
-            legal_moves = position_stats.legal_moves
-            
-            if active_drawback:
-                print(f"AI turn with active drawback: {active_drawback}")
-                print(f"Legal moves with '{active_drawback}' drawback: {len(legal_moves)}")
-                
-                # Log first few legal moves for debugging
-                if legal_moves:
-                    print("Sample legal moves:")
-                    for i, move in enumerate(legal_moves[:5]):
-                        print(f"  {i+1}. {move.uci()}")
-                else:
-                    print("No legal moves available with this drawback - ending game")
-                    game_over = True
-                    winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
-                    return
-            else:
-                print("AI turn with no drawback restrictions")
-                print(f"Legal moves: {len(legal_moves)}")
-                
-        except Exception as e:
-            print(f"Error analyzing position: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        
-        # Ensure depth and time limit are valid
-        search_depth = max(1, AI_DEPTH)
-        search_time_limit = max(0.5, TIME_LIMIT)
-        
-        print(f"Starting AI search for {('White' if board.turn else 'Black')} at depth {search_depth} with time limit {search_time_limit}s")
-        
-        # Start the search using our enhanced async engine, passing the smart time management setting
-        start_search(board, search_depth, search_time_limit, USE_SMART_TIME_MANAGEMENT)
-        search_in_progress = True
-        return
-    
-    # If a search is complete, apply the move
-    if search_in_progress and is_search_complete():
-        # Get the move from the engine
-        result = get_result()
-        print(f"AI selected move: {result}")
-        
-        # Reset search state for next turn
-        search_in_progress = False
-        reset_search()
-        
-        # Extract the move from the result
-        move = None
-        if result:
+            # Get the move from the result
+            move = None
             if isinstance(result, dict) and 'move' in result:
                 # Result is a dictionary with a 'move' key (from newer async engine)
                 move_uci = result['move']
@@ -355,34 +348,48 @@ def handle_ai_turn(board):
             else:
                 # Result is directly a Move object (from older engine versions)
                 move = result
-        
-        # If no move found, try to pick the first legal move as fallback
-        if not move:
-            legal_moves = list(board.legal_moves)
-            if legal_moves:
-                move = legal_moves[0]
-                print(f"Selected fallback move: {move}")
-            else:
-                print("No legal moves available - game should be over")
-                game_over = True
-                winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
-                return
-        
-        # Apply the chosen move
-        try:
-            board.push(move)
-            print(f"Move applied: {move}")
             
-            # Check for game end conditions AFTER the move is applied
-            game_over, winner_color, end_message = check_game_end_conditions(board)
-            if game_over:
-                print(f"Game over after AI move: {end_message}")
-                return
+            # If no move found, try to pick the first legal move as fallback
+            if not move:
+                # Try to use the last seen best move if available
+                if last_seen_best_move:
+                    for legal_move in board.legal_moves:
+                        if legal_move.uci() == last_seen_best_move:
+                            move = legal_move
+                            print(f"Using last seen best move: {move}")
+                            break
                 
-            # Set cooldown to prevent AI from moving again immediately
-            ai_move_cooldown = AI_MOVE_COOLDOWN
+                # If still no move, fall back to first legal move
+                if not move:
+                    legal_moves = list(board.legal_moves)
+                    if legal_moves:
+                        move = legal_moves[0]
+                        print(f"Selected fallback move: {move}")
+                    else:
+                        print("No legal moves available - game should be over")
+                        game_over = True
+                        winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
+                        return
+            
+            # Apply the chosen move
+            try:
+                board.push(move)
+                print(f"Move applied: {move}")
+                
+                # Check for game end conditions AFTER the move is applied
+                game_over, winner_color, end_message = check_game_end_conditions(board)
+                if game_over:
+                    print(f"Game over after AI move: {end_message}")
+                    return
+                    
+                # Set cooldown to prevent AI from moving again immediately
+                ai_move_cooldown = AI_MOVE_COOLDOWN
+            except Exception as e:
+                print(f"Error applying move: {str(e)}")
+                import traceback
+                traceback.print_exc()
         except Exception as e:
-            print(f"Error applying move: {str(e)}")
+            print(f"Error processing AI move: {str(e)}")
             import traceback
             traceback.print_exc()
     else:
@@ -397,22 +404,50 @@ def handle_ai_turn(board):
             if elapsed_time > search_time_limit * 1.5:  # Give a 50% buffer to be safe
                 print(f"Search exceeded time limit ({elapsed_time:.1f}s > {search_time_limit}s), forcing completion...")
                 
+                # Check if we have a current best move before timing out
+                current_timeout_best_move = None
+                try:
+                    from AI.drawback_Bot import current_best_move
+                    if current_best_move:
+                        current_timeout_best_move = current_best_move.uci()
+                        print(f"Current best move at timeout: {current_timeout_best_move}")
+                except (ImportError, AttributeError):
+                    pass
+                
                 # Get whatever move we have so far
                 move = get_result()
                 
-                # If no move available, try to get a legal move
-                if move is None:
-                    legal_moves = list(board.legal_moves)
-                    if legal_moves:
-                        move = legal_moves[0]
-                        print(f"No move from search, selected first legal move: {move}")
-                    else:
-                        print("No legal moves available - game should be over")
-                        game_over = True
-                        winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
-                        search_in_progress = False
-                        reset_search()
-                        return
+                # If no move available, try to use the last known best move
+                if move is None or (isinstance(move, dict) and move.get('move') is None):
+                    if current_timeout_best_move:
+                        # Found a current best move at timeout, use it
+                        for legal_move in board.legal_moves:
+                            if legal_move.uci() == current_timeout_best_move:
+                                move = {'move': current_timeout_best_move, 'time': elapsed_time, 'note': 'timeout_recovery'}
+                                print(f"Using current best move at timeout: {current_timeout_best_move}")
+                                break
+                    elif last_seen_best_move:
+                        # Try using the last seen best move
+                        for legal_move in board.legal_moves:
+                            if legal_move.uci() == last_seen_best_move:
+                                move = {'move': last_seen_best_move, 'time': elapsed_time, 'note': 'timeout_recovery_last_seen'}
+                                print(f"Using last seen best move for timeout: {last_seen_best_move}")
+                                break
+                    
+                    # If still no move, fall back to first legal move
+                    if move is None or (isinstance(move, dict) and move.get('move') is None):
+                        legal_moves = list(board.legal_moves)
+                        if legal_moves:
+                            fallback_move = legal_moves[0]
+                            move = {'move': fallback_move.uci(), 'time': elapsed_time, 'note': 'fallback'}
+                            print(f"No move from search, selected first legal move: {fallback_move}")
+                        else:
+                            print("No legal moves available - game should be over")
+                            game_over = True
+                            winner_color = chess.WHITE if board.turn == chess.BLACK else chess.BLACK
+                            search_in_progress = False
+                            reset_search()
+                            return
                 
                 # Reset search state
                 search_in_progress = False
@@ -437,18 +472,22 @@ def handle_ai_turn(board):
                                 
                     elif isinstance(move, dict) and 'error' in move and move['error'] == 'timeout':
                         # Handle timeout error - try to use last known best move from drawback_Bot
-                        try:
-                            from AI.drawback_Bot import current_best_move
-                            if current_best_move:
-                                move_uci = current_best_move.uci()
-                                # Find the matching legal move
-                                for legal_move in board.legal_moves:
-                                    if legal_move.uci() == move_uci:
-                                        move_obj = legal_move
-                                        break
-                                print(f"Using last known best move from timeout: {move_obj}")
-                        except (ImportError, AttributeError):
-                            pass
+                        if current_timeout_best_move:
+                            # Find the matching legal move
+                            for legal_move in board.legal_moves:
+                                if legal_move.uci() == current_timeout_best_move:
+                                    move_obj = legal_move
+                                    break
+                            if move_obj:
+                                print(f"Using best move at timeout: {move_obj}")
+                        elif last_seen_best_move:
+                            # Try the last seen best move as fallback
+                            for legal_move in board.legal_moves:
+                                if legal_move.uci() == last_seen_best_move:
+                                    move_obj = legal_move
+                                    break
+                            if move_obj:
+                                print(f"Using last seen best move after timeout: {move_obj}")
                     else:
                         # Move is already a Move object
                         move_obj = move
