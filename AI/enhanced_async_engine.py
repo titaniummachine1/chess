@@ -211,6 +211,7 @@ def get_result():
                 # New best move found, update our tracking and reset the timer
                 engine_state.last_best_move = move_str
                 engine_state.start_time = time.time()  # Reset the timer!
+                return None  # Return None to indicate search is still in progress
     except (ImportError, AttributeError):
         # If we can't access the current best move, just continue
         pass

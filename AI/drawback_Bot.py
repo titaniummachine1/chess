@@ -127,6 +127,10 @@ class DrawbackBot:
         """
         global current_best_move, current_best_score
         
+        # Reset global tracking variables
+        current_best_move = None
+        current_best_score = None
+        
         # Reset node counter
         self.nodes = 0
         
@@ -140,10 +144,6 @@ class DrawbackBot:
         best_move = None
         best_score = -MATE_UPPER
         start_overall = time.time()
-        
-        # Reset global tracking variables
-        current_best_move = None
-        current_best_score = None
         
         # Smart time management variables
         last_best_move = None
@@ -237,7 +237,7 @@ class DrawbackBot:
                 
                 # Update best move and score
                 if current_best_move_local:
-                    # Smart time management: Check if move has changed and reset time if needed
+                    # Smart time management: Check if move has changed
                     if use_smart_time_management and current_depth >= 3:
                         if current_best_move_local == last_best_move:
                             # Move is stable from previous iteration
@@ -258,8 +258,7 @@ class DrawbackBot:
                                 print(f"New best move found: {current_best_move_local.uci()}, extending search time")
                                 start_overall = time.time()  # Reset the overall time to extend search
                                 
-                                # Update global tracking variables for external access
-                                global current_best_move, current_best_score
+                                # Update global tracking variables for external access - important for time extension
                                 current_best_move = current_best_move_local
                                 current_best_score = score
                     
@@ -268,8 +267,7 @@ class DrawbackBot:
                     best_move = current_best_move_local
                     best_score = score
                     
-                    # Update global tracking variables for external access
-                    global current_best_move, current_best_score
+                    # Always update global variables with the current best move
                     current_best_move = best_move
                     current_best_score = best_score
                     
