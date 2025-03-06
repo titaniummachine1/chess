@@ -200,23 +200,64 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
             return -MATE_UPPER + bot.nodes
         return 0  # Draw
 
+    # Define a helper function to detect atomic bomb loss for consistent evaluation
+    def is_atomic_bomb_loss(board, color):
+        if not hasattr(board, 'get_active_drawback') or not hasattr(board, '_last_capture_square'):
+            return False
+        
+        # Only check if atomic bomb is active
+        active_drawback = board.get_active_drawback(color)
+        if active_drawback != "atomic_bomb":
+            return False
+            
+        # Only check if a capture happened
+        if not board._last_capture_square:
+            return False
+            
+        # Find the king
+        king_square = None
+        for square, piece in board.piece_map().items():
+            if piece and piece.piece_type == chess.KING and piece.color == color:
+                king_square = square
+                break
+                
+        if not king_square:
+            return False
+            
+        # Check if the capture is adjacent to the king
+        capture_square = board._last_capture_square
+        king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+        capture_file = chess.square_file(capture_square)
+        capture_rank = chess.square_rank(capture_square)
+        
+        # If they're adjacent (within 1 square in any direction)
+        if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
+            if king_square != capture_square:  # Not the king itself
+                return True
+                
+        return False
+
     # Check for immediate loss by drawback win conditions
     if hasattr(board, 'check_drawback_win'):
-        opponent = not board.turn
         active_drawback = board.get_active_drawback(board.turn) if hasattr(board, 'get_active_drawback') else None
         
         if active_drawback:
             # Check if current position is already a loss due to drawback
             is_loss = False
             
-            # Try to use the drawback_manager's function first
-            try:
-                from GameState.drawback_manager import get_drawback_loss_function
-                loss_function = get_drawback_loss_function(active_drawback)
-                if loss_function and loss_function(board, board.turn):
-                    is_loss = True
-            except Exception:
-                pass
+            # Check specifically for atomic bomb loss
+            if active_drawback == "atomic_bomb":
+                is_loss = is_atomic_bomb_loss(board, board.turn)
+            
+            # If not an atomic bomb loss, try other drawback loss functions
+            if not is_loss:
+                try:
+                    from GameState.drawback_manager import get_drawback_loss_function
+                    loss_function = get_drawback_loss_function(active_drawback)
+                    if loss_function and loss_function(board, board.turn):
+                        is_loss = True
+                except Exception:
+                    pass
                 
             # If it's a loss, return a very negative score
             if is_loss:
@@ -265,6 +306,7 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         # Absolute highest priority for principal variation moves
         if pv_move_uci and move_uci == pv_move_uci:
             score = 50000000
+            
         # Check for immediate variant win moves (highest priority)
         board.push(move)
         is_variant_win = board.is_variant_win() if hasattr(board, 'is_variant_win') else False
@@ -276,6 +318,7 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         if hasattr(board, 'get_active_drawback') and hasattr(board, 'check_drawback_win'):
             active_drawback = board.get_active_drawback(not board.turn)  # Check opponent's drawback
             if active_drawback:
+                # For move ordering, use the board's drawback win check
                 is_drawback_win = board.check_drawback_win(not board.turn, active_drawback)
                 
                 # Check if opponent has any legal moves with their drawback
@@ -284,29 +327,21 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                     if not has_moves:
                         is_no_legal_moves = True
                         
-                # Special check for atomic bomb - captures near opponent's king
+                # For atomic bomb, check specifically if this capture is adjacent to opponent's king
                 if active_drawback == "atomic_bomb" and board.is_capture(move):
-                    # Find opponent's king
-                    opponent_color = not board.turn
-                    king_square = None
-                    for square, piece in board.piece_map().items():
-                        if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
-                            king_square = square
-                            break
+                    # Set the last capture square for atomic bomb check
+                    old_capture_square = board._last_capture_square if hasattr(board, '_last_capture_square') else None
+                    if hasattr(board, '_last_capture_square'):
+                        board._last_capture_square = move.to_square
                     
-                    if king_square is not None:
-                        # Check if capture is adjacent to king
-                        capture_square = move.to_square
-                        king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
-                        capture_file = chess.square_file(capture_square)
-                        capture_rank = chess.square_rank(capture_square)
-                        
-                        # If they're adjacent (within 1 square in any direction)
-                        if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
-                            if king_square != capture_square:  # Not the king itself
-                                # This is an atomic bomb win - highest priority
-                                is_drawback_win = True
-                                score = 30000000  # Even higher priority than other wins
+                    # Use the same function for consistency
+                    if is_atomic_bomb_loss(board, not board.turn):
+                        is_drawback_win = True
+                        score = 30000000  # Even higher priority than other wins
+                    
+                    # Restore the last capture square
+                    if hasattr(board, '_last_capture_square'):
+                        board._last_capture_square = old_capture_square
         
         board.pop()
         
@@ -408,29 +443,10 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
             opponent_color = not board.turn
             active_drawback = board.get_active_drawback(opponent_color)
             
-            if active_drawback == "atomic_bomb" and board.is_capture(move):
-                # For atomic bomb, we need to check if this capture is adjacent to the opponent's king
-                
-                # Find opponent's king
-                king_square = None
-                for square, piece in board.piece_map().items():
-                    if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
-                        king_square = square
-                        break
-                
-                if king_square is not None:
-                    # Check if the capture square (move.to_square) is adjacent to the king
-                    capture_square = move.to_square
-                    king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
-                    capture_file = chess.square_file(capture_square)
-                    capture_rank = chess.square_rank(capture_square)
-                    
-                    # If they're adjacent (within 1 square in any direction)
-                    if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
-                        if king_square != capture_square:  # Not capturing the king itself
-                            win_by_drawback = True
-            
-            # Also try using the drawback loss function to detect other drawback-specific wins
+            # For atomic bomb, use our consistent check function
+            if active_drawback == "atomic_bomb":
+                win_by_drawback = is_atomic_bomb_loss(board, opponent_color)
+            # For other drawbacks, use the loss function
             elif active_drawback and hasattr(board, 'check_drawback_win'):
                 try:
                     from GameState.drawback_manager import get_drawback_loss_function
