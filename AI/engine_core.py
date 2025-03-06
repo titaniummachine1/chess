@@ -18,7 +18,7 @@ from AI.evaluation import evaluate_position
 from GameState.drawback_manager import get_drawback_loss_function
 
 # Cache structures
-EngineResult = namedtuple('EngineResult', 'move score pv nodes time')
+EngineResult = namedtuple('EngineResult', 'move score pv nodes time tt killers history')
 PositionStats = namedtuple('PositionStats', 'legal_moves captures checks advancement_moves')
 
 # Global instances
@@ -115,7 +115,7 @@ def check_drawback_loss_conditions(board):
     # No loss conditions detected
     return (False, None, None)
 
-def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_time_management=False):
+def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_time_management=False, preserved_data=None):
     """
     Unified function to select the best move for a position
     
@@ -125,6 +125,7 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_tim
         time_limit: Time limit in seconds
         book_move_bonuses: Dictionary of book moves with bonus values
         smart_time_management: If True, terminate early if best move is stable
+        preserved_data: Dictionary of preserved search data from previous searches
         
     Returns:
         EngineResult containing move, score, and search statistics
@@ -152,6 +153,15 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_tim
         from AI.drawback_Bot import DrawbackBot
         engine = DrawbackBot()
         
+        # Apply preserved search data if available
+        if preserved_data:
+            if 'transposition_table' in preserved_data and preserved_data['transposition_table']:
+                engine.tt = preserved_data['transposition_table']
+            if 'killer_moves' in preserved_data and preserved_data['killer_moves']:
+                engine.killers = preserved_data['killer_moves']
+            if 'history_heuristic' in preserved_data and preserved_data['history_heuristic']:
+                engine.history = preserved_data['history_heuristic']
+        
         # If we have book move bonuses, pass them to the engine, but with reduced importance
         if book_move_bonuses:
             # Convert the UCI strings to a proper format for the engine
@@ -174,34 +184,84 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_tim
         
         # Check if we found a move
         if best_move:
+            # Get the principal variation if available
+            principal_variation = []
+            if hasattr(engine, 'principal_variation') and engine.principal_variation:
+                principal_variation = engine.principal_variation
+            elif best_move:
+                principal_variation = [best_move.uci()]
+            
+            # Create result with preserved search data
             return EngineResult(
                 move=best_move,
                 score=score,
-                pv=[best_move.uci()],
+                pv=principal_variation,
                 nodes=engine.nodes,
-                time=elapsed
+                time=elapsed,
+                tt=engine.tt,
+                killers=engine.killers,
+                history=engine.history
             )
-    except Exception as e:
-        print(f"Error using DrawbackBot: {str(e)}")
-        import traceback
-        traceback.print_exc()
-    
-    # If we reach here, all above methods failed - use fallback legal move
-    legal_moves = list(board.legal_moves)
-    if legal_moves:
-        fallback_move = legal_moves[0]
+        else:
+            # Try to find any legal move as a fallback
+            king_capture_move = get_king_capture_move(board)
+            if king_capture_move:
+                return EngineResult(
+                    move=king_capture_move, 
+                    score=9000,
+                    pv=[king_capture_move.uci()],
+                    nodes=1,
+                    time=elapsed,
+                    tt=engine.tt,
+                    killers=engine.killers,
+                    history=engine.history
+                )
+                
+            # Last resort: pick a random legal move
+            legal_moves = list(board.legal_moves)
+            if legal_moves:
+                random_move = random.choice(legal_moves)
+                return EngineResult(
+                    move=random_move,
+                    score=0,
+                    pv=[random_move.uci()],
+                    nodes=1,
+                    time=elapsed,
+                    tt=engine.tt,
+                    killers=engine.killers,
+                    history=engine.history
+                )
+    except ImportError:
+        # Use fallback method if DrawbackBot is not available
+        best_move = bot_best_move(board, depth, time_limit, book_move_bonuses)
         elapsed = time.time() - start_time
-        print(f"Using fallback move: {fallback_move.uci()}")
         return EngineResult(
-            move=fallback_move,
+            move=best_move,
             score=0,
-            pv=[fallback_move.uci()],
-            nodes=1,
+            pv=[best_move.uci()] if best_move else [],
+            nodes=0,
             time=elapsed
         )
+    except Exception as e:
+        # If any error occurs, return a minimal result
+        print(f"Error in select_best_move: {e}")
+        import traceback
+        traceback.print_exc()
         
-    # No legal moves available
-    return EngineResult(move=None, score=-9999, pv=[], nodes=0, time=0)
+        # Try to at least return a legal move
+        legal_moves = list(board.legal_moves)
+        if legal_moves:
+            fallback_move = legal_moves[0]
+            return EngineResult(
+                move=fallback_move,
+                score=0,
+                pv=[fallback_move.uci()],
+                nodes=0,
+                time=time.time() - start_time
+            )
+        
+    # Should never reach here, but provide a null result just in case
+    return EngineResult(move=None, score=0, pv=[], nodes=0, time=0)
 
 def evaluate_current_position(board, include_drawback_effects=True):
     """

@@ -37,6 +37,7 @@ class DrawbackBot:
         self.eval_cache = {}  # Cache for position evaluations
         self.book_move_bonuses = {}  # Book move bonuses in centipawns (uses UCI strings as keys)
         self.depth = 0  # Current search depth - will be updated during search
+        self.principal_variation = []  # Store the principal variation
         
     def evaluate_position(self, board, drawbacks=None):
         """Enhanced evaluation function that considers drawbacks"""
@@ -139,6 +140,9 @@ class DrawbackBot:
         self.history = {}
         self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Reset killers for all depths
         self.eval_cache = {}
+        
+        # Reset principal variation
+        self.principal_variation = []
         
         # Starting values for search
         best_move = None
@@ -302,23 +306,18 @@ class DrawbackBot:
                     for legal_move in board.legal_moves:
                         if legal_move.uci() == entry_move_uci:
                             best_move = legal_move
-                            best_score = entry.value
-                            print(f"Using fallback move from transposition table: {entry_move_uci}")
                             break
-                    if best_move:  # Break outer loop if move found
+                    if best_move:
                         break
         
-        # If still no move found from transposition table, pick the first legal move
-        if best_move is None:
-            legal_moves = list(board.legal_moves)
-            if legal_moves:
-                best_move = legal_moves[0]
-                best_score = 0  # Neutral score for fallback move
-                print(f"No move found in search, using first legal move: {best_move.uci()}")
+        # If we found a move, reconstruct the principal variation
+        if best_move:
+            self.principal_variation = self.extract_principal_variation(board, best_move, depth)
         
-        # Report final search results
-        elapsed_total = time.time() - start_overall
-        print(f"Search completed in {elapsed_total:.2f}s, final best move: {best_move.uci() if best_move else 'None'}")
+        # Final sanity check - if no move found, pick the first legal move
+        if best_move is None and any(True for _ in board.legal_moves):
+            best_move = next(iter(board.legal_moves))
+            self.principal_variation = [best_move.uci()]
         
         return best_score, best_move
         
@@ -502,6 +501,55 @@ class DrawbackBot:
             return board.zobrist_hash()
         else:
             return str(board.fen())
+
+    def extract_principal_variation(self, board, first_move, max_depth=10):
+        """
+        Extract the principal variation from the transposition table
+        
+        Args:
+            board: Current position
+            first_move: First move of the PV
+            max_depth: Maximum depth to extract
+            
+        Returns:
+            List of UCI strings representing the principal variation
+        """
+        pv = [first_move.uci()]
+        board_copy = board.copy()
+        
+        # Make the first move
+        board_copy.push(first_move)
+        
+        # Try to extract the rest of the PV
+        for _ in range(1, max_depth):
+            # Try to get the next move from the transposition table
+            pos_key = self.get_position_key(board_copy)
+            if pos_key not in self.tt or not self.tt[pos_key].move:
+                break
+                
+            # Get the move from the table
+            next_move_uci = self.tt[pos_key].move
+            
+            # Check if it's a valid move
+            next_move = None
+            for move in board_copy.legal_moves:
+                if move.uci() == next_move_uci:
+                    next_move = move
+                    break
+            
+            # If not a valid move, stop extraction
+            if next_move is None:
+                break
+                
+            # Add the move to the PV and make it on the board
+            pv.append(next_move_uci)
+            board_copy.push(next_move)
+            
+            # Stop if we've reached a terminal position
+            if not any(True for _ in board_copy.legal_moves):
+                break
+        
+        return pv
 
 def best_move(board, depth=3, time_limit=5, book_move_bonuses=None):
     """

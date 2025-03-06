@@ -31,7 +31,7 @@ USE_SMART_TIME_MANAGEMENT = True
 # Use the enhanced async engine
 from AI.enhanced_async_engine import (
     start_search, get_result, is_search_complete, 
-    reset_search, get_progress
+    reset_search, get_progress, engine_state
 )
 
 # Import engine core utilities for position analysis and drawback checking
@@ -572,7 +572,11 @@ async def async_main():
                     game_over = False
                     winner_color = None
                     search_in_progress = False
-                    print("Game restarted!")
+                    
+                    # Cancel any running search and clear search knowledge
+                    reset_search()
+                    engine_state.clear_search_knowledge()
+                    print("Game restarted and search knowledge cleared!")
                     
                 elif event.key == p.K_t:
                     # Open tinker panel with 'T' key

@@ -244,6 +244,16 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
     if key in bot.tt and bot.tt[key].move:
         tt_move_uci = bot.tt[key].move  # Already stored as UCI
     
+    # Get principal variation move if available
+    pv_move_uci = None
+    if hasattr(bot, 'principal_variation') and bot.principal_variation:
+        # The current position is fen, but PV move is from the original position
+        # Need to get the first move of the PV that matches this position
+        for move in legal_moves:
+            if move.uci() in bot.principal_variation:
+                pv_move_uci = move.uci()
+                break
+    
     # Score moves without any direct comparisons of Move objects
     scored_moves = []
     
@@ -252,6 +262,9 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         score = 0
         move_uci = move.uci()
         
+        # Absolute highest priority for principal variation moves
+        if pv_move_uci and move_uci == pv_move_uci:
+            score = 50000000
         # Check for immediate variant win moves (highest priority)
         board.push(move)
         is_variant_win = board.is_variant_win() if hasattr(board, 'is_variant_win') else False
@@ -299,11 +312,11 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         
         if is_variant_win or is_drawback_win:
             # Absolute highest priority: variant win
-            score = 20000000
+            score = 30000000
         elif is_no_legal_moves:
             # High priority: opponent has no legal moves
-            score = 19000000
-        # Highest priority for transposition table moves
+            score = 20000000
+        # Very high priority for transposition table moves
         elif tt_move_uci and move_uci == tt_move_uci:
             score = 10000000
         # High priority for killer moves (good quiet moves found during search)
@@ -426,29 +439,7 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                         win_by_drawback = True
                 except Exception:
                     pass
-                    
-            # Special case for atomic_bomb drawback (when making a capture near enemy king)
-            if active_drawback == "atomic_bomb" and board.is_capture(move):
-                # Find enemy king square
-                king_square = None
-                for square, piece in board.piece_map().items():
-                    if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
-                        king_square = square
-                        break
-                
-                if king_square is not None:
-                    # Get the capture square (it's the destination of our move)
-                    capture_square = move.to_square
-                    king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
-                    capture_file = chess.square_file(capture_square)
-                    capture_rank = chess.square_rank(capture_square)
-                    
-                    # If the file and rank differences are at most 1, they're adjacent
-                    if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
-                        if king_square != capture_square:  # Not the king's own square
-                            win_by_drawback = True
-                            # This is a critical atomic bomb win, prioritize it highly
-        
+            
         # If this move leads to a win by drawback, return a winning score
         if win_by_drawback:
             if old_search_flag is not None:

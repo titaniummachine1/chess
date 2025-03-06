@@ -29,8 +29,14 @@ class AsyncEngineState:
         self.current_best_move = None  # Current best move
         self.board = None  # Added to store the board
         
+        # Persistent search data between moves
+        self.transposition_table = {}  # Preserve TT between moves
+        self.killer_moves = None  # Preserve killer moves between moves
+        self.history_heuristic = {}  # Preserve history heuristic between moves
+        self.principal_variation = []  # Store the principal variation
+        
     def reset(self):
-        """Reset the engine state completely"""
+        """Reset the engine state completely but preserve search knowledge"""
         self.current_progress = "Idle"
         self.current_result = None
         self.start_time = None
@@ -39,6 +45,16 @@ class AsyncEngineState:
         self.last_best_move = None
         self.current_best_move = None
         self.board = None
+        
+        # Note: We do NOT reset transposition_table, killer_moves, history_heuristic, or principal_variation
+        # This allows search knowledge to persist between moves
+        
+    def clear_search_knowledge(self):
+        """Clear all accumulated search knowledge (use sparingly)"""
+        self.transposition_table = {}
+        self.killer_moves = None
+        self.history_heuristic = {}
+        self.principal_variation = []
 
 # Create a singleton instance
 engine_state = AsyncEngineState()
@@ -66,10 +82,29 @@ def run_search(board, depth, time_limit=5, smart_time_management=False):
     # Create a board copy for thread safety
     board_copy = board.copy()
     
+    # Get the preserved search data from the engine state
+    global engine_state
+    preserved_data = {
+        'transposition_table': engine_state.transposition_table,
+        'killer_moves': engine_state.killer_moves,
+        'history_heuristic': engine_state.history_heuristic,
+        'principal_variation': engine_state.principal_variation
+    }
+    
     # Call the engine to get best move
     # When smart_time_management is True, the search will extend time when a new best move is found
     # and terminate early if the best move remains stable
-    result = select_best_move(board_copy, depth, time_limit, {}, smart_time_management)
+    result = select_best_move(board_copy, depth, time_limit, {}, smart_time_management, preserved_data=preserved_data)
+    
+    # If the engine returned updated search data, store it for future searches
+    if hasattr(result, 'tt') and result.tt:
+        engine_state.transposition_table = result.tt
+    if hasattr(result, 'killers') and result.killers:
+        engine_state.killer_moves = result.killers
+    if hasattr(result, 'history') and result.history:
+        engine_state.history_heuristic = result.history
+    if hasattr(result, 'pv') and result.pv:
+        engine_state.principal_variation = result.pv
     
     # Return the move from the result
     return result.move if result else None
