@@ -197,7 +197,9 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
     if not any(True for _ in board.legal_moves):
         # This is a draw in standard chess, but in Drawback Chess could be a win or loss
         if board.is_variant_loss():
-            return -MATE_UPPER + bot.nodes
+            # When losing, return a score that's worse the closer we are to the root
+            # This incentivizes the engine to find variations that delay mate
+            return -MATE_UPPER + bot.nodes + depth
         return 0  # Draw
 
     # Define a helper function to detect atomic bomb loss for consistent evaluation
@@ -260,8 +262,9 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                     pass
                 
             # If it's a loss, return a very negative score
+            # Add depth to prefer longer paths to inevitable loss
             if is_loss:
-                return -MATE_UPPER + bot.nodes
+                return -MATE_UPPER + bot.nodes + depth
     
     # Generate legal moves
     legal_moves = list(board.legal_moves)
@@ -457,13 +460,14 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                     pass
             
         # If this move leads to a win by drawback, return a winning score
+        # Subtract depth to prefer shorter paths to checkmate
         if win_by_drawback:
             if old_search_flag is not None:
                 board._in_search = old_search_flag
             if old_capture_square is not None and hasattr(board, '_last_capture_square'):
                 board._last_capture_square = old_capture_square
             board.pop()
-            return MATE_UPPER - bot.nodes - 1
+            return MATE_UPPER - bot.nodes - depth
         
         # Recursive search
         try:
