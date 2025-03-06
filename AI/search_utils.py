@@ -199,6 +199,28 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         if board.is_variant_loss():
             return -MATE_UPPER + bot.nodes
         return 0  # Draw
+
+    # Check for immediate loss by drawback win conditions
+    if hasattr(board, 'check_drawback_win'):
+        opponent = not board.turn
+        active_drawback = board.get_active_drawback(board.turn) if hasattr(board, 'get_active_drawback') else None
+        
+        if active_drawback:
+            # Check if current position is already a loss due to drawback
+            is_loss = False
+            
+            # Try to use the drawback_manager's function first
+            try:
+                from GameState.drawback_manager import get_drawback_loss_function
+                loss_function = get_drawback_loss_function(active_drawback)
+                if loss_function and loss_function(board, board.turn):
+                    is_loss = True
+            except Exception:
+                pass
+                
+            # If it's a loss, return a very negative score
+            if is_loss:
+                return -MATE_UPPER + bot.nodes
     
     # Generate legal moves
     legal_moves = list(board.legal_moves)
@@ -248,6 +270,28 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                     has_moves = any(True for _ in board.legal_moves)
                     if not has_moves:
                         is_no_legal_moves = True
+                        
+                # Special check for atomic bomb - captures near opponent's king
+                if active_drawback == "atomic_bomb" and board.is_capture(move):
+                    # Find opponent's king
+                    opponent_color = not board.turn
+                    king_square = None
+                    for square, piece in board.piece_map().items():
+                        if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                            king_square = square
+                            break
+                    
+                    if king_square is not None:
+                        # Check if capture is adjacent to king
+                        capture_square = move.to_square
+                        king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                        capture_file = chess.square_file(capture_square)
+                        capture_rank = chess.square_rank(capture_square)
+                        
+                        # If they're adjacent (within 1 square in any direction)
+                        if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
+                            if king_square != capture_square:  # Not the king itself
+                                is_drawback_win = True  # This is an atomic bomb win
         
         board.pop()
         
@@ -328,6 +372,58 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
         # Try the move
         board.push(move)
         
+        # Set the search flag to true if the board supports it
+        # This helps optimize drawback checks during search
+        if hasattr(board, '_in_search'):
+            old_search_flag = board._in_search
+            board._in_search = True
+        else:
+            old_search_flag = None
+        
+        # Check for immediate win due to drawback
+        win_by_drawback = False
+        if hasattr(board, 'get_active_drawback'):
+            opponent_color = not board.turn
+            active_drawback = board.get_active_drawback(opponent_color)
+            
+            if active_drawback and hasattr(board, 'check_drawback_win'):
+                try:
+                    from GameState.drawback_manager import get_drawback_loss_function
+                    loss_function = get_drawback_loss_function(active_drawback)
+                    if loss_function and loss_function(board, opponent_color):
+                        win_by_drawback = True
+                except Exception:
+                    pass
+                    
+            # Special case for atomic_bomb drawback (when making a capture near enemy king)
+            if active_drawback == "atomic_bomb" and board.is_capture(move):
+                # Find enemy king square
+                king_square = None
+                for square, piece in board.piece_map().items():
+                    if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                        king_square = square
+                        break
+                
+                if king_square is not None:
+                    # Get the capture square (it's the destination of our move)
+                    capture_square = move.to_square
+                    king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                    capture_file = chess.square_file(capture_square)
+                    capture_rank = chess.square_rank(capture_square)
+                    
+                    # If the file and rank differences are at most 1, they're adjacent
+                    if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
+                        if king_square != capture_square:  # Not the king's own square
+                            win_by_drawback = True
+                            # This is a critical atomic bomb win, prioritize it highly
+        
+        # If this move leads to a win by drawback, return a winning score
+        if win_by_drawback:
+            if old_search_flag is not None:
+                board._in_search = old_search_flag
+            board.pop()
+            return MATE_UPPER - bot.nodes - 1
+        
         # Recursive search
         try:
             # Full-depth search for first move, reduced depth for others
@@ -343,7 +439,11 @@ def negamax(bot, board, depth, alpha, beta, allow_null=True, can_enter_quiescenc
                         value = -negamax(bot, board, depth - 1, -beta, -alpha, allow_null, can_enter_quiescence, start_time, time_limit)
                 else:
                     value = -negamax(bot, board, depth - 1, -beta, -alpha, allow_null, can_enter_quiescence, start_time, time_limit)
-                    
+            
+            # Restore search flag
+            if old_search_flag is not None:
+                board._in_search = old_search_flag
+                
             board.pop()
             
             # Update best value
