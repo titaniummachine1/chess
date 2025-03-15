@@ -13,7 +13,7 @@ class OpeningBook:
     A combined opening book that uses both GM games and standard chess openings
     with enhanced capture validation
     """
-    def __init__(self, book_file=None, debug_level=1):
+    def __init__(self, book_file=None, debug_level=1, load_gm_games=False):
         self.positions = {}
         self.unique_positions = 0
         self.total_games = 0
@@ -24,8 +24,11 @@ class OpeningBook:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             book_file = os.path.join(base_dir, "BookMoves", "GMGAMES.txt")
         
-        # First load GM games
-        self.load_gm_games(book_file)
+        # First load GM games only if requested
+        if load_gm_games:
+            self.load_gm_games(book_file)
+        elif self.debug_level >= 1:
+            print("Skipping GM games loading for faster startup")
         
         # Then load standard openings from CSV
         self.integrate_csv_openings()
@@ -180,8 +183,8 @@ class OpeningBook:
         position = board.fen().split(' ')[0]
         return position in self.positions
 
-# Create a singleton instance with normal debug level
-OPENING_BOOK = OpeningBook(debug_level=1)
+# Initialize the opening book without loading GM games for faster startup
+OPENING_BOOK = OpeningBook(debug_level=1, load_gm_games=False)
 
 def is_book_position(board):
     """Convenience function to check if a position is in the book"""
