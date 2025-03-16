@@ -111,19 +111,23 @@ class DrawbackBot:
             
             # Special case for atomic bomb
             elif active_drawback == "atomic_bomb":
-                # Check if any captures would trigger a loss
+                # Find our king
                 king_square = None
-                for square, piece in board.piece_map().items():
+                for square in chess.SQUARES:
+                    piece = board.piece_at(square)
                     if piece and piece.piece_type == chess.KING and piece.color == board.turn:
                         king_square = square
                         break
                 
-                if king_square:
+                if king_square is not None:
                     # Evaluate danger level for king
-                    dangerous_squares = 0
                     king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
                     
                     # Check each adjacent square
+                    danger_score = 0
+                    total_pieces = 0
+                    protected_pieces = 0
+                    
                     for file_offset in [-1, 0, 1]:
                         for rank_offset in [-1, 0, 1]:
                             if file_offset == 0 and rank_offset == 0:
@@ -141,15 +145,41 @@ class DrawbackBot:
                             
                             # If adjacent square has our piece that can be captured
                             if piece and piece.color == board.turn:
-                                attackers = board.attackers(not board.turn, target_square)
-                                defenders = board.attackers(board.turn, target_square)
+                                total_pieces += 1
+                                attackers = list(board.attackers(not board.turn, target_square))
+                                defenders = list(board.attackers(board.turn, target_square))
                                 
-                                # If piece is attacked and not adequately defended
-                                if attackers and len(attackers) > len(defenders):
-                                    dangerous_squares += 1
+                                # Subtract king from defenders since it shouldn't defend in atomic bomb
+                                if king_square in defenders:
+                                    defenders.remove(king_square)
+                                
+                                # Assess piece safety
+                                if not attackers:
+                                    # No attackers is good
+                                    protected_pieces += 1
+                                    danger_score += 20  # Bonus for safe piece
+                                elif len(defenders) >= len(attackers):
+                                    # Adequately defended
+                                    protected_pieces += 1
+                                    danger_score += 10  # Smaller bonus
+                                else:
+                                    # Piece is under attack with insufficient defense
+                                    danger_score -= 100  # Heavy penalty for each endangered piece
+                                    
+                                    # Even higher penalty for completely undefended pieces
+                                    if not defenders:
+                                        danger_score -= 150
                     
-                    # Heavy penalty for each dangerous square - incentivize protecting king area
-                    mobility_score -= dangerous_squares * 40
+                    # Overall assessment based on piece safety
+                    if total_pieces == 0:
+                        # No pieces next to king is ideal for atomic bomb
+                        danger_score += 300
+                    elif protected_pieces == total_pieces:
+                        # All pieces are protected - good
+                        danger_score += 200
+                    
+                    # Apply danger score to mobility score
+                    mobility_score += danger_score
         else:
             mobility_score = 0
         
@@ -193,11 +223,37 @@ class DrawbackBot:
         Returns:
             tuple of (score, best move)
         """
+        # Global variables for external tracking
+        global current_best_move
+        global current_best_score
+        
         # Initialize
         best_move = None
         best_score = float('-inf') if board.turn == chess.WHITE else float('inf')  # Different default for each side
         start_time = time.time()
         start_overall = start_time
+        
+        # Detect if we're in a hopeless position
+        legal_moves = list(board.legal_moves)
+        if not legal_moves:
+            print(f"No legal moves in position: {board.fen()}")
+            return -30000 if board.turn == chess.WHITE else 30000, None
+        
+        # CRITICAL: Never assume a position is lost until we've checked ALL moves
+        # First try for immediate wins
+        king_capture_move = None
+        for move in legal_moves:
+            target_piece = board.piece_at(move.to_square)
+            if target_piece and target_piece.piece_type == chess.KING:
+                print(f"Found immediate king capture: {move.uci()}")
+                return 20000, move  # MATE_UPPER, immediate win
+        
+        # At this point we know we have legal moves, so make sure we always return one
+        default_move = legal_moves[0]  # Always have a fallback move
+        
+        # This will be our move if regular search finds nothing
+        best_move = default_move
+        print(f"Initial fallback move: {best_move.uci()}")
         
         # Initialize stability tracking for smart time management
         stable_move_threshold = 1.0  # 1 second of stability before early exit
@@ -214,6 +270,44 @@ class DrawbackBot:
         
         # Prepare for Iterative Deepening
         self.nodes = 0
+        
+        # For atomic bomb drawback, also check for captures adjacent to king
+        active_drawback = board.get_active_drawback(not board.turn) if hasattr(board, 'get_active_drawback') else None
+        if active_drawback == "atomic_bomb":
+            # Find opponent's king
+            opponent_king_square = None
+            opponent_color = not board.turn
+            
+            for square in chess.SQUARES:
+                piece = board.piece_at(square)
+                if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                    opponent_king_square = square
+                    break
+                    
+            if opponent_king_square:
+                # Find squares adjacent to opponent's king
+                king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
+                for file_offset in [-1, 0, 1]:
+                    for rank_offset in [-1, 0, 1]:
+                        if file_offset == 0 and rank_offset == 0:
+                            continue  # Skip the king's own square
+                        
+                        target_file = king_file + file_offset
+                        target_rank = king_rank + rank_offset
+                        
+                        # Skip off-board squares
+                        if not (0 <= target_file < 8 and 0 <= target_rank < 8):
+                            continue
+                            
+                        target_square = chess.square(target_file, target_rank)
+                        # Check if there's an opponent's piece here that we can capture
+                        piece = board.piece_at(target_square)
+                        if piece and piece.color == opponent_color:
+                            # See if we can capture this piece
+                            for move in legal_moves:
+                                if move.to_square == target_square and board.is_capture(move):
+                                    print(f"Found atomic bomb win - capturing piece next to king: {move.uci()}")
+                                    return 19000, move  # Almost MATE_UPPER, immediate win
         
         try:
             # Perform iterative deepening search
@@ -238,21 +332,27 @@ class DrawbackBot:
                 
                 # Start this iteration's search
                 try:
-                    # Use negamax search which alternates perspective
-                    if current_depth <= 4:  # Deeper searches sometimes benefit from aspiration windows
-                        # For shallow depths, use a full window to avoid research
-                        score = negamax(self, board, current_depth, float('-inf'), float('inf'), 
-                                    True, True, start_time, time_limit)
-                    else:
-                        # Try with aspiration window first
-                        try:
-                            score = negamax(self, board, current_depth, window_alpha, window_beta, 
-                                        True, True, start_time, time_limit)
-                        except ValueError:
-                            # If window is too tight, research with full window
-                            print(f"Score {score} outside aspiration window [{window_alpha}, {window_beta}], researching with full window")
+                    # Wrap the search in a try-except to catch any issues
+                    try:
+                        # Use negamax search which alternates perspective
+                        if current_depth <= 4:  # Deeper searches sometimes benefit from aspiration windows
+                            # For shallow depths, use a full window to avoid research
                             score = negamax(self, board, current_depth, float('-inf'), float('inf'), 
-                                        True, True, start_time, time_limit)
+                                        board.turn == chess.WHITE, is_root=True, start_time=start_time, time_limit=time_limit)
+                        else:
+                            # Try with aspiration window first
+                            try:
+                                score = negamax(self, board, current_depth, window_alpha, window_beta, 
+                                            board.turn == chess.WHITE, is_root=True, start_time=start_time, time_limit=time_limit)
+                            except ValueError:
+                                # If window is too tight, research with full window
+                                print(f"Score {score} outside aspiration window [{window_alpha}, {window_beta}], researching with full window")
+                                score = negamax(self, board, current_depth, float('-inf'), float('inf'), 
+                                            board.turn == chess.WHITE, is_root=True, start_time=start_time, time_limit=time_limit)
+                    except Exception as e:
+                        print(f"Error during search at depth {current_depth}: {e}")
+                        # If we hit an error, stop at this depth but don't fail completely
+                        break
                 except TimeoutError:
                     # If timeout occurred during search, use the best move from previous iteration
                     print(f"Search timed out at depth {current_depth}")
@@ -271,6 +371,14 @@ class DrawbackBot:
                         if legal_move.uci() == entry_move_uci:
                             current_best_move_local = legal_move
                             break
+                
+                # If no move found in TT, try to pick a sensible default
+                if not current_best_move_local and best_move:
+                    # Keep using our previous best move
+                    current_best_move_local = best_move
+                elif not current_best_move_local:
+                    # As a last resort, pick first legal move
+                    current_best_move_local = default_move
                 
                 # Calculate search time for this iteration
                 elapsed = time.time() - start_time
@@ -322,11 +430,17 @@ class DrawbackBot:
                     current_best_score = best_score
                     
                     # Report progress
-                    print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {best_move.uci()}, Time: {elapsed:.2f}s")
+                    if best_move:
+                        print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, Best move: {best_move.uci()}, Time: {elapsed:.2f}s")
+                    else:
+                        print(f"Depth: {current_depth}, Score: {score:.2f}, Nodes: {self.nodes}, No valid move found, Time: {elapsed:.2f}s")
                 
                 # Check if we've completed the max depth
                 if current_depth == depth:
-                    print(f"Search completed in {total_elapsed:.2f}s, final best move: {best_move.uci()}")
+                    if best_move:
+                        print(f"Search completed in {total_elapsed:.2f}s, final best move: {best_move.uci()}")
+                    else:
+                        print(f"Search completed in {total_elapsed:.2f}s, no valid move found")
                 
                 # If using smart time management and we've reached a sufficient depth,
                 # consider stopping if time is nearly up
@@ -342,39 +456,75 @@ class DrawbackBot:
         # Reset depth attribute to avoid confusing future searches
         self.depth = 0
         
-        # If we still don't have a move, try to get one from the transposition table
-        if best_move is None:
-            # Look for any move in the transposition table
-            for key, entry in self.tt.items():
-                if entry.move:
-                    # Convert UCI string to Move object
-                    entry_move_uci = entry.move
-                    for legal_move in board.legal_moves:
-                        if legal_move.uci() == entry_move_uci:
-                            best_move = legal_move
-                            break
-                    if best_move:
+        # CRITICAL: Ensure we always return a valid move if one exists
+        # This prevents returning None when legal moves are available
+        if best_move is None and legal_moves:
+            # Try to pick a sensible default based on various heuristics
+            for move in legal_moves:
+                # Check for captures
+                if board.is_capture(move):
+                    # Prefer capturing the most valuable piece
+                    target = board.piece_at(move.to_square)
+                    if target and target.piece_type >= chess.KNIGHT:
+                        best_move = move
+                        print(f"Fallback to capturing move: {move.uci()}")
                         break
+                    
+            # If still no move, just pick the first legal move
+            if best_move is None:
+                best_move = legal_moves[0]
+                print(f"Fallback to first legal move: {best_move.uci()}")
         
         # If we found a move, reconstruct the principal variation
         if best_move:
             self.principal_variation = self.extract_principal_variation(board, best_move, depth)
         
-        # Final sanity check - if no move found, pick the first legal move
-        if best_move is None and any(True for _ in board.legal_moves):
-            best_move = next(iter(board.legal_moves))
-            self.principal_variation = [best_move.uci()]
-        
         return best_score, best_move
         
     def check_terminal_state(self, board):
         """Check for terminal state conditions in Drawback Chess"""
+        # HIGHEST PRIORITY: Check for king captures - immediate loss
+        # Check if our king is under attack
+        king_square = None
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece and piece.piece_type == chess.KING and piece.color == board.turn:
+                king_square = square
+                break
+        
+        # If king is under attack and we have no legal moves to save it, that's terminal
+        if king_square:
+            attackers = list(board.attackers(not board.turn, king_square))
+            if attackers:
+                # King is under attack - can we save it?
+                can_save_king = False
+                for move in board.legal_moves:
+                    board.push(move)
+                    king_captured = True
+                    # Find our king in the new position
+                    for sq in chess.SQUARES:
+                        piece = board.piece_at(sq)
+                        if piece and piece.piece_type == chess.KING and piece.color == board.turn:
+                            # King still exists, check if it's under attack
+                            attackers_after = list(board.attackers(not board.turn, sq))
+                            if not attackers_after:
+                                king_captured = False
+                            break
+                    board.pop()
+                    if not king_captured:
+                        can_save_king = True
+                        break
+                
+                # If we can't save the king, it's a terminal state
+                if not can_save_king:
+                    return True
+        
         # No legal moves - stalemate or checkmate
         if not any(True for _ in board.legal_moves):
             return True
         
         # Check for variant loss due to drawbacks
-        if board.is_variant_loss():
+        if hasattr(board, 'is_variant_loss') and board.is_variant_loss():
             return True
             
         # Check for king capture on next move - terminal state
@@ -451,6 +601,57 @@ class DrawbackBot:
         # Get active drawback
         active_drawback = board.get_active_drawback(board.turn)
         
+        # FIRST check for immediate wins
+        # 1. Immediate king captures are ALWAYS best
+        for move in board.legal_moves:
+            target_piece = board.piece_at(move.to_square)
+            if target_piece and target_piece.piece_type == chess.KING:
+                print(f"Found immediate king capture in get_best_move: {move.uci()}")
+                return move
+                
+        # 2. For atomic bomb, capturing a piece adjacent to the opponent's king is also a win
+        is_opponent_atomic_bomb = False
+        opponent_color = not board.turn
+        if hasattr(board, 'get_active_drawback'):
+            opponent_drawback = board.get_active_drawback(opponent_color)
+            if opponent_drawback == "atomic_bomb":
+                is_opponent_atomic_bomb = True
+                
+                # Find opponent's king
+                opponent_king_square = None
+                for square in chess.SQUARES:
+                    piece = board.piece_at(square)
+                    if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                        opponent_king_square = square
+                        break
+                
+                if opponent_king_square:
+                    # Find squares adjacent to opponent's king
+                    king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
+                    
+                    for file_offset in [-1, 0, 1]:
+                        for rank_offset in [-1, 0, 1]:
+                            if file_offset == 0 and rank_offset == 0:
+                                continue  # Skip the king itself
+                                
+                            target_file = king_file + file_offset
+                            target_rank = king_rank + rank_offset
+                            
+                            # Skip off-board squares
+                            if not (0 <= target_file < 8 and 0 <= target_rank < 8):
+                                continue
+                                
+                            target_square = chess.square(target_file, target_rank)
+                            
+                            # Check if there's an opponent piece we can capture
+                            target_piece = board.piece_at(target_square)
+                            if target_piece and target_piece.color == opponent_color:
+                                # Look for a move to capture this piece
+                                for move in board.legal_moves:
+                                    if move.to_square == target_square and board.is_capture(move):
+                                        print(f"Found atomic bomb win in get_best_move: {move.uci()}")
+                                        return move
+        
         # Find book moves to guide search, but never play them directly
         book_move = None
         if use_book:
@@ -465,7 +666,7 @@ class DrawbackBot:
                 else:
                     # Don't return book move - just save it to guide search
                     print(f"Book move will guide search but not be played directly")
-                
+        
         # Mark the board for search
         if hasattr(board, "_in_search"):
             board._in_search = True
@@ -493,6 +694,97 @@ class DrawbackBot:
             # Just return any legal move - preferably one that doesn't lose a piece
             moves = list(board.legal_moves)
             if moves:
+                # If we have atomic bomb drawback, prioritize moves that don't expose pieces next to king
+                if active_drawback == "atomic_bomb":
+                    # Find our king
+                    king_square = None
+                    for square in chess.SQUARES:
+                        piece = board.piece_at(square)
+                        if piece and piece.piece_type == chess.KING and piece.color == board.turn:
+                            king_square = square
+                            break
+                    
+                    if king_square:
+                        # Find adjacent squares
+                        adjacent_squares = []
+                        king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                        for file_offset in [-1, 0, 1]:
+                            for rank_offset in [-1, 0, 1]:
+                                if file_offset == 0 and rank_offset == 0:
+                                    continue  # Skip the king's own square
+                                
+                                target_file = king_file + file_offset
+                                target_rank = king_rank + rank_offset
+                                
+                                # Skip off-board squares
+                                if not (0 <= target_file < 8 and 0 <= target_rank < 8):
+                                    continue
+                                
+                                adjacent_squares.append(chess.square(target_file, target_rank))
+                        
+                        # Prioritize moves that protect pieces next to king
+                        protecting_moves = []
+                        safe_moves = []
+                        king_moves = []
+                        other_moves = []
+                        
+                        # Find pieces next to king
+                        threatened_pieces = []
+                        for adj_square in adjacent_squares:
+                            piece = board.piece_at(adj_square)
+                            if piece and piece.color == board.turn:
+                                attackers = board.attackers(not board.turn, adj_square)
+                                if attackers:
+                                    threatened_pieces.append(adj_square)
+                        
+                        for m in moves:
+                            # Prioritize king captures
+                            if board.piece_at(m.to_square) and board.piece_at(m.to_square).piece_type == chess.KING:
+                                # Immediate win
+                                print(f"Found immediate king capture in fallback: {m.uci()}")
+                                return m
+                            
+                            # King moves away from adjacent pieces are good
+                            if board.piece_at(m.from_square) and board.piece_at(m.from_square).piece_type == chess.KING:
+                                king_moves.append(m)
+                                continue
+                            
+                            # Moving threatened pieces away
+                            if m.from_square in threatened_pieces:
+                                safe_moves.append(m)
+                                continue
+                            
+                            # Moves that defend threatened pieces
+                            board.push(m)
+                            defends_threatened = False
+                            for adj_square in threatened_pieces:
+                                attackers_after = board.attackers(not board.turn, adj_square)
+                                defenders_after = board.attackers(board.turn, adj_square)
+                                if len(defenders_after) > len(attackers_after):
+                                    defends_threatened = True
+                                    break
+                            board.pop()
+                            
+                            if defends_threatened:
+                                protecting_moves.append(m)
+                            else:
+                                other_moves.append(m)
+                        
+                        # Return in priority order
+                        if protecting_moves:
+                            selected_move = protecting_moves[0]
+                            print(f"Selected protecting move: {selected_move.uci()}")
+                            return selected_move
+                        elif safe_moves:
+                            selected_move = safe_moves[0]
+                            print(f"Selected move to get piece to safety: {selected_move.uci()}")
+                            return selected_move
+                        elif king_moves:
+                            selected_move = king_moves[0]
+                            print(f"Selected king move: {selected_move.uci()}")
+                            return selected_move
+                
+                # Regular fallback logic for other drawbacks
                 # Sort moves by safety (non-captures first)
                 safe_moves = []
                 other_moves = []
@@ -553,42 +845,60 @@ class DrawbackBot:
         Returns:
             List of UCI strings representing the principal variation
         """
-        pv = [first_move.uci()]
-        board_copy = board.copy()
-        
-        # Make the first move
-        board_copy.push(first_move)
-        
-        # Try to extract the rest of the PV
-        for _ in range(1, max_depth):
-            # Try to get the next move from the transposition table
-            pos_key = self.get_position_key(board_copy)
-            if pos_key not in self.tt or not self.tt[pos_key].move:
-                break
-                
-            # Get the move from the table
-            next_move_uci = self.tt[pos_key].move
+        try:
+            pv = [first_move.uci()]
+            board_copy = board.copy()
             
-            # Check if it's a valid move
-            next_move = None
-            for move in board_copy.legal_moves:
-                if move.uci() == next_move_uci:
-                    next_move = move
+            # Verify the first move is legal before pushing it
+            first_move_legal = False
+            for legal_move in board_copy.legal_moves:
+                if legal_move == first_move:
+                    first_move_legal = True
                     break
             
-            # If not a valid move, stop extraction
-            if next_move is None:
-                break
-                
-            # Add the move to the PV and make it on the board
-            pv.append(next_move_uci)
-            board_copy.push(next_move)
+            if not first_move_legal:
+                print(f"Warning: First move {first_move.uci()} is not legal in position {board_copy.fen()}")
+                return pv
             
-            # Stop if we've reached a terminal position
-            if not any(True for _ in board_copy.legal_moves):
-                break
-        
-        return pv
+            # Make the first move
+            board_copy.push(first_move)
+            
+            # Try to extract the rest of the PV
+            for _ in range(1, max_depth):
+                # Try to get the next move from the transposition table
+                pos_key = self.get_position_key(board_copy)
+                if pos_key not in self.tt or not self.tt[pos_key].move:
+                    break
+                    
+                # Get the move from the table
+                next_move_uci = self.tt[pos_key].move
+                
+                # Check if it's a valid move
+                next_move = None
+                for move in board_copy.legal_moves:
+                    if move.uci() == next_move_uci:
+                        next_move = move
+                        break
+                
+                # If not a valid move, stop extraction
+                if next_move is None:
+                    break
+                    
+                # Add the move to the PV and make it on the board
+                pv.append(next_move_uci)
+                board_copy.push(next_move)
+                
+                # Stop if we've reached a terminal position
+                if not any(True for _ in board_copy.legal_moves):
+                    break
+                
+            return pv
+        except Exception as e:
+            print(f"Error extracting principal variation: {e}")
+            # Return at least the first move if we have it
+            if first_move:
+                return [first_move.uci()]
+            return []
 
 def best_move(board, depth=3, time_limit=5, book_move_bonuses=None):
     """

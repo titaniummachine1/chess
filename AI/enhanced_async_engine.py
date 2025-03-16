@@ -11,9 +11,10 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import chess
+import random
 
 # Import engine components
-from AI.engine_core import select_best_move, find_immediate_win
+from AI.engine_core import select_best_move
 
 # Global state for async search
 class AsyncEngineState:
@@ -85,8 +86,22 @@ def run_search(board, depth, time_limit=5, smart_time_management=False):
     assert depth > 0, f"Search depth must be positive, got {depth}"
     assert time_limit > 0, f"Time limit must be positive, got {time_limit}"
     
+    print(f"Starting engine search at depth {depth}, time limit {time_limit}s")
+    print(f"Board position: {board.fen()}")
+    print(f"Turn: {'White' if board.turn == chess.WHITE else 'Black'}")
+    
+    # Get the active drawback for the current player
+    active_drawback = None
+    if hasattr(board, 'get_active_drawback'):
+        active_drawback = board.get_active_drawback(board.turn)
+        print(f"Active drawback for current player: {active_drawback}")
+    
     # Create a board copy for thread safety
     board_copy = board.copy()
+    
+    # Add a flag to indicate we're in a search - critical for drawback checks
+    if hasattr(board_copy, '_in_search'):
+        board_copy._in_search = True
     
     # Get the preserved search data from the engine state
     global engine_state
@@ -97,23 +112,100 @@ def run_search(board, depth, time_limit=5, smart_time_management=False):
         'principal_variation': engine_state.principal_variation
     }
     
-    # Call the engine to get best move
-    # When smart_time_management is True, the search will extend time when a new best move is found
-    # and terminate early if the best move remains stable
-    result = select_best_move(board_copy, depth, time_limit, {}, smart_time_management, preserved_data=preserved_data)
+    try:
+        # List all legal moves before starting search
+        legal_moves = list(board_copy.legal_moves)
+        print(f"Legal moves count: {len(legal_moves)}")
+        if len(legal_moves) > 0:
+            print(f"Sample legal moves: {[move.uci() for move in legal_moves[:5]]}")
+        else:
+            print("WARNING: No legal moves available!")
+            return None
+        
+        # Call the engine to get best move
+        # When smart_time_management is True, the search will extend time when a new best move is found
+        # and terminate early if the best move remains stable
+        result = select_best_move(board_copy, depth, time_limit, {}, smart_time_management, preserved_data=preserved_data)
     
-    # If the engine returned updated search data, store it for future searches
-    if hasattr(result, 'tt') and result.tt:
-        engine_state.transposition_table = result.tt
-    if hasattr(result, 'killers') and result.killers:
-        engine_state.killer_moves = result.killers
-    if hasattr(result, 'history') and result.history:
-        engine_state.history_heuristic = result.history
-    if hasattr(result, 'pv') and result.pv:
-        engine_state.principal_variation = result.pv
+        # If the engine returned updated search data, store it for future searches
+        if hasattr(result, 'tt') and result.tt:
+            engine_state.transposition_table = result.tt
+        if hasattr(result, 'killers') and result.killers:
+            engine_state.killer_moves = result.killers
+        if hasattr(result, 'history') and result.history:
+            engine_state.history_heuristic = result.history
+        if hasattr(result, 'pv') and result.pv:
+            engine_state.principal_variation = result.pv
+        
+        if result.move:
+            print(f"Search completed successfully, selected move: {result.move.uci()}, score: {result.score}")
+            engine_state.current_best_move = result.move
+            return result.move
+        else:
+            print("WARNING: Search completed but no move was found!")
+    except Exception as e:
+        print(f"ERROR in engine search: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        
+    # If we get here, either the search failed or no move was found
+    # Try to select a good fallback move
     
-    # Return the move from the result
-    return result.move if result else None
+    print("Attempting to find fallback move...")
+    
+    # Try to select a legal move as fallback
+    if board_copy.legal_moves:
+        legal_moves = list(board_copy.legal_moves)
+        
+        # First look for king captures (instant win)
+        for move in legal_moves:
+            target_piece = board_copy.piece_at(move.to_square)
+            if target_piece and target_piece.piece_type == chess.KING:
+                print("Fallback selected immediate king capture")
+                return move
+                
+        # For atomic bomb, find threatened pieces adjacent to king
+        if active_drawback == "atomic_bomb":
+            # Find our king
+            king_square = None
+            for square in chess.SQUARES:
+                piece = board_copy.piece_at(square)
+                if piece and piece.piece_type == chess.KING and piece.color == board_copy.turn:
+                    king_square = square
+                    break
+                    
+            if king_square:
+                # Find adjacent squares
+                adjacent_squares = []
+                king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                for file_offset in [-1, 0, 1]:
+                    for rank_offset in [-1, 0, 1]:
+                        if file_offset == 0 and rank_offset == 0:
+                            continue  # Skip the king's own square
+                        
+                        target_file = king_file + file_offset
+                        target_rank = king_rank + rank_offset
+                        
+                        # Skip off-board squares
+                        if not (0 <= target_file < 8 and 0 <= target_rank < 8):
+                            continue
+                        
+                        adjacent_squares.append(chess.square(target_file, target_rank))
+                        
+                # Find any moves that protect threatened pieces next to king
+                for move in legal_moves:
+                    # Moving pieces away from danger
+                    if move.from_square in adjacent_squares:
+                        # A piece next to the king is moving
+                        print(f"Fallback selected move that gets a piece away from the king: {move.uci()}")
+                        return move
+        
+        # As a last resort, select a random legal move
+        fallback_move = random.choice(legal_moves)
+        print(f"Fallback selected random move: {fallback_move.uci()}")
+        return fallback_move
+        
+    return None
 
 async def async_search(board, depth, time_limit=5, smart_time_management=False):
     """
@@ -136,6 +228,68 @@ async def async_search(board, depth, time_limit=5, smart_time_management=False):
     engine_state.last_best_move = None
     engine_state.current_best_move = None
     engine_state.board = board
+    
+    # CRITICAL: First check for immediate wins before doing any search
+    # 1. Look for direct king captures - absolute highest priority
+    for move in board.legal_moves:
+        target = board.piece_at(move.to_square)
+        if target and target.piece_type == chess.KING:
+            elapsed = 0.1  # Minimal time since this is instant
+            engine_state.current_result = {
+                'move': move.uci(),
+                'score': 30000,  # Much higher than normal evaluation
+                'time': elapsed,
+                'depth': depth,
+                'note': 'immediate_king_capture'
+            }
+            engine_state.current_progress = f"Found immediate king capture: {move.uci()}"
+            return  # Exit immediately - no need to search
+            
+    # 2. For atomic bomb drawback, check if we can cause a loss by capturing a piece adjacent to opponent's king
+    opponent_color = not board.turn
+    if hasattr(board, 'get_active_drawback'):
+        active_drawback = board.get_active_drawback(opponent_color)
+        if active_drawback == "atomic_bomb":
+            # Find opponent's king
+            opponent_king_square = None
+            for square in chess.SQUARES:
+                piece = board.piece_at(square)
+                if piece and piece.piece_type == chess.KING and piece.color == opponent_color:
+                    opponent_king_square = square
+                    break
+                    
+            if opponent_king_square:
+                # Check each adjacent square for opponent pieces we can capture
+                king_file, king_rank = chess.square_file(opponent_king_square), chess.square_rank(opponent_king_square)
+                for file_offset in [-1, 0, 1]:
+                    for rank_offset in [-1, 0, 1]:
+                        if file_offset == 0 and rank_offset == 0:
+                            continue  # Skip the king itself
+                        
+                        target_file = king_file + file_offset
+                        target_rank = king_rank + rank_offset
+                        
+                        # Skip off-board squares
+                        if not (0 <= target_file < 8 and 0 <= target_rank < 8):
+                            continue
+                            
+                        target_square = chess.square(target_file, target_rank)
+                        # Check if there's an opponent's piece here that we can capture
+                        target_piece = board.piece_at(target_square)
+                        if target_piece and target_piece.color == opponent_color:
+                            # Look for a move that captures this piece
+                            for move in board.legal_moves:
+                                if move.to_square == target_square and board.is_capture(move):
+                                    elapsed = 0.1  # Again, minimal time
+                                    engine_state.current_result = {
+                                        'move': move.uci(),
+                                        'score': 29000,  # Very high score
+                                        'time': elapsed,
+                                        'depth': depth,
+                                        'note': 'atomic_bomb_win'
+                                    }
+                                    engine_state.current_progress = f"Found atomic bomb win: {move.uci()}"
+                                    return  # Exit immediately - this is a winning move
     
     # Create a partial function with the search parameters
     search_func = partial(run_search, 

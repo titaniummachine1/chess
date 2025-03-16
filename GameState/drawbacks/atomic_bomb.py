@@ -5,8 +5,10 @@ import chess
 # Kings cannot capture because they would explode.
 
 """
-Drawback: Atomic Bomb
-Description: If your opponent captures a piece adjacent to your king, you lose.
+Atomic Bomb Drawback - Pieces cannot be captured adjacent to the king
+
+If a piece is captured adjacent to the king, the player with the atomic_bomb
+drawback immediately loses the game.
 
 Reverse Imports:
 - AI/engine_core.py: imports check_explosion_loss for loss condition check
@@ -23,6 +25,25 @@ DRAWBACK_INFO = {
     "loss_condition": "check_explosion_loss",
     "supported": True
 }
+
+def is_legal(board, move, color):
+    """
+    Checks if the move is legal under the atomic bomb drawback
+    
+    Args:
+        board: The chess board
+        move: The move to check
+        color: The color making the move
+        
+    Returns:
+        Boolean indicating if the move is legal
+    """
+    # If we're in search, we need to allow more moves for proper evaluation
+    in_search = getattr(board, "_in_search", False)
+    
+    # All moves are legal under atomic bomb - the player just loses
+    # if a capture is made next to their king
+    return True
 
 def check_atomic_bomb(board, move, color):
     """
@@ -48,76 +69,107 @@ def check_atomic_bomb(board, move, color):
 
 def check_explosion_loss(board, color):
     """
-    Check if a player has lost due to a piece being captured adjacent to their king.
+    Check if a capture next to king results in an immediate loss
+    for the player with the atomic_bomb drawback.
     
     Args:
-        board: The current chess board
-        color: The color to check for loss (the player with the atomic_bomb drawback)
-    
+        board: Chess board
+        color: Color to check (chess.WHITE or chess.BLACK)
+        
     Returns:
-        tuple: (has_lost, reason) where has_lost is a boolean and reason is a string
+        Tuple of (has_lost, reason)
     """
-    # Safety check 1: Ensure there was at least one move
-    if len(board.move_stack) == 0:
-        print("ATOMIC: No moves made yet, cannot have atomic explosion")
-        return False, None
+    # Get debug flag
+    debug_print = not getattr(board, "_in_search", False)
     
-    # Safety check 2: It must be the affected player's turn
-    # This means the opponent just moved and potentially made a capture
+    # If we're not in the player's turn, this check doesn't apply
+    # A loss condition can only be triggered after opponent moved
     if board.turn != color:
-        print(f"ATOMIC: Not {color}'s turn, so opponent didn't just move")
         return False, None
+        
+    # No moves made - can't lose yet
+    if len(board.move_stack) == 0:
+        return False, None
+        
+    # Get the last move - CRITICAL: The loss triggered by opponent's last move
+    last_move = board.move_stack[-1]
     
-    # Safety check 3: The last move must be a capture
-    # Use the DrawbackBoard's tracking properties directly
+    # Find if the last move was a capture
     was_capture = False
     
-    # Check if board has a tracking flag (which DrawbackBoard does)
-    if hasattr(board, '_lastmove_was_capture'):
-        was_capture = board._lastmove_was_capture
-        if was_capture:
-            print("ATOMIC: Board history indicates a capture")
+    # Try different methods to determine if it was a capture
+    if hasattr(board, "_lastmove_was_capture") and board._lastmove_was_capture:
+        was_capture = True
+    elif hasattr(board, "is_capture") and board.is_capture(last_move):
+        was_capture = True
+    elif last_move.to_square == board.ep_square:
+        was_capture = True
     
-    # Final safety check
+    # If last move wasn't a capture, no atomic bomb triggered
     if not was_capture:
-        print(f"ATOMIC: Last move was not a capture")
         return False, None
     
-    # Find the king of the player with atomic bomb drawback
+    # Now check if the capture was adjacent to the player's king
     king_square = None
+    
+    # Find the king
     for square, piece in board.piece_map().items():
         if piece.piece_type == chess.KING and piece.color == color:
             king_square = square
             break
-    
+            
     if king_square is None:
-        # King already captured through normal means
+        # King already captured by other means
         return False, None
+        
+    # Get the capture square (where the last move landed)
+    capture_square = last_move.to_square
     
-    # Get the capture square from the board's tracking
-    capture_square = None
-    if hasattr(board, '_last_capture_square'):
-        capture_square = board._last_capture_square
+    # Print debug information if needed
+    if debug_print:
+        print(f"ATOMIC BOMB: Capture detected at {chess.square_name(capture_square)}")
     
-    # If no capture square information, can't determine adjacency
-    if capture_square is None:
-        print("ATOMIC: No capture square information available")
-        return False, None
-    
-    print(f"DEBUG: Last capture at {chess.square_name(capture_square)}")
-    
-    # Check if the capture was adjacent to the king
+    # Check if the capture square is adjacent to the king
     king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
-    capture_file, capture_rank = chess.square_file(capture_square), chess.square_rank(capture_square)
+    capture_file = chess.square_file(capture_square)
+    capture_rank = chess.square_rank(capture_square)
     
-    # Adjacent if file and rank differ by at most 1
+    # Adjacent square = within 1 square in any direction
     is_adjacent = (abs(king_file - capture_file) <= 1 and 
-                   abs(king_rank - capture_rank) <= 1)
-    
+                  abs(king_rank - capture_rank) <= 1 and
+                  king_square != capture_square)  # Not the king itself
+                  
     if is_adjacent:
-        print(f"ATOMIC: Player {color} lost due to a capture at {chess.square_name(capture_square)} " 
-              f"adjacent to their king at {chess.square_name(king_square)}")
-        return True, f"{'White' if color == chess.WHITE else 'Black'} lost - a piece was captured next to their king"
+        if debug_print:
+            print(f"ATOMIC BOMB TRIGGERED: Capture at {chess.square_name(capture_square)} adjacent to king at {chess.square_name(king_square)}")
+        return True, "a piece was captured next to their king"
     
-    print(f"ATOMIC: Capture at {chess.square_name(capture_square)} was not adjacent to king at {chess.square_name(king_square)}")
     return False, None
+
+def get_description():
+    """Returns a description of the drawback"""
+    return "If a piece is captured adjacent to your king, you immediately lose the game."
+
+def init_board(board, color):
+    """Initialize the board for this drawback"""
+    # Store an additional state variable to track if last move was a capture
+    board._lastmove_was_capture = False
+    # Store the square where the last capture occurred
+    board._last_capture_square = None
+    
+def after_move(board, move, color):
+    """Post-move processing for atomic bomb drawback"""
+    # Check if the move was a capture and store the result
+    was_capture = False
+    
+    # Handle en passant separately
+    if board.piece_at(move.to_square) or move.to_square == board.ep_square:
+        was_capture = True
+        board._lastmove_was_capture = True
+        board._last_capture_square = move.to_square
+    else:
+        board._lastmove_was_capture = False
+        board._last_capture_square = None
+    
+    # Return normally - loss conditions are checked elsewhere
+    return was_capture

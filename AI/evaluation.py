@@ -5,10 +5,28 @@ from AI.piece_square_table import PIECE_VALUES, piece_square_tables, compute_gam
 CHECKMATE_SCORE = 10000
 DRAW_SCORE = 0
 
-def evaluate_position(board, pst_weights=None):
+def evaluate_position(board, pst_weights=None, drawbacks=None):
     """
     Enhanced evaluation function that can apply PST adjustments from book moves
+    
+    Args:
+        board: Chess board position
+        pst_weights: Dictionary of piece-square table weights
+        drawbacks: Dictionary of drawbacks for evaluation fine-tuning
+        
+    Returns:
+        Numeric score from white's perspective in centipawns
     """
+    # Check for checkmate/stalemate
+    if not any(True for _ in board.legal_moves):
+        # No legal moves
+        if board.is_check():
+            # Checkmate - worst possible score
+            return -CHECKMATE_SCORE if board.turn == chess.WHITE else CHECKMATE_SCORE
+        else:
+            # Stalemate - draw score
+            return DRAW_SCORE
+    
     # Check if we have valid book weights to apply
     if pst_weights and "weights" in pst_weights and pst_weights["weights"]:
         book_weights = pst_weights["weights"]
@@ -98,7 +116,93 @@ def evaluate_position(board, pst_weights=None):
         score += evaluate_center_control(board)
         score += evaluate_opening_structure(board)
         
-        return score if board.turn == chess.WHITE else -score
+        # Special case: book move positions might get a bonus
+        score_adjustment = 0
+        
+        # Book position score adjustments based on popularity
+        if is_book_position(board):
+            try:
+                from AI.book_handler import get_position_popularity
+                popularity = get_position_popularity(board.fen().split(' ')[0])
+                
+                # Give a bonus based on popularity (1-5 centipawns)
+                if popularity:
+                    score_adjustment += min(popularity // 10, 5)
+            except ImportError:
+                pass
+        
+        # Handle immediate win/loss conditions
+        if board.is_variant_win():
+            return CHECKMATE_SCORE  # Maximum score for a win
+        
+        if board.is_variant_loss():
+            return -CHECKMATE_SCORE  # Minimum score for a loss
+        
+        # Handle stalemate, insufficient material, 50 move rule, 3-fold repetition
+        if board.is_stalemate() or board.is_insufficient_material() or board.is_fifty_moves():
+            return DRAW_SCORE  # Draw score is 0
+        
+        # Special adjustments for specific drawbacks to influence evaluation
+        drawback_adjustment = 0
+        
+        # Get active drawback for current player
+        active_drawback = None 
+        
+        if hasattr(board, 'get_active_drawback'):
+            active_drawback = board.get_active_drawback(board.turn)
+        
+        if active_drawback:
+            # Adjustments for the atomic bomb drawback
+            if active_drawback == "atomic_bomb":
+                # Find our king
+                king_square = None
+                for square in chess.SQUARES:
+                    piece = board.piece_at(square)
+                    if piece and piece.piece_type == chess.KING and piece.color == board.turn:
+                        king_square = square
+                        break
+                
+                if king_square is not None:
+                    # Check adjacent squares for our pieces
+                    king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                    
+                    # Heavy penalty for pieces adjacent to our king (up to -300 points)
+                    adjacent_piece_count = 0
+                    vulnerable_piece_count = 0
+                    
+                    for file_offset in [-1, 0, 1]:
+                        for rank_offset in [-1, 0, 1]:
+                            if file_offset == 0 and rank_offset == 0:
+                                continue  # Skip the king itself
+                            
+                            target_file = king_file + file_offset
+                            target_rank = king_rank + rank_offset
+                            
+                            # Skip off-board squares
+                            if not (0 <= target_file < 8 and 0 <= target_rank < 8):
+                                continue
+                            
+                            target_square = chess.square(target_file, target_rank)
+                            piece = board.piece_at(target_square)
+                            
+                            # If this square has our piece
+                            if piece and piece.color == board.turn:
+                                adjacent_piece_count += 1
+                                
+                                # Check if this piece is attacked by opponent's pieces
+                                attackers = board.attackers(not board.turn, target_square)
+                                if attackers:
+                                    vulnerable_piece_count += 1
+                    
+                    # Apply penalties for having pieces next to king
+                    if board.turn == chess.WHITE:
+                        drawback_adjustment -= adjacent_piece_count * 20  # Each piece costs 20 points
+                        drawback_adjustment -= vulnerable_piece_count * 100  # Each vulnerable piece costs 100 points
+                    else:
+                        drawback_adjustment += adjacent_piece_count * 20  # For black, adjustments have opposite sign
+                        drawback_adjustment += vulnerable_piece_count * 100
+        
+        return score + score_adjustment + drawback_adjustment if board.turn == chess.WHITE else -score - score_adjustment - drawback_adjustment
     else:
         # Regular evaluation without book adjustments
         return evaluate_position_standard(board)

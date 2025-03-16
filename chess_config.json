@@ -1,11 +1,11 @@
 {
     "position": {
-        "name": "initial",
-        "custom_fen": ""
+        "name": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "custom_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     },
     "drawbacks": {
         "white": "",
-        "black": ""
+        "black": "atomic_bomb"
     },
     "ai": {
         "white_ai": false,
