@@ -16,6 +16,7 @@ from AI.ai_utils import get_king_capture_move, MATE_LOWER, MATE_UPPER, MAX_DEPTH
 from AI.book_handler import BookMoveSelector
 from AI.evaluation import evaluate_position
 from GameState.drawback_manager import get_drawback_loss_function
+from GameState.drawbacks.atomic_bomb import check_explosion_loss
 
 # Cache structures
 EngineResult = namedtuple('EngineResult', 'move score pv nodes time tt killers history')
@@ -82,38 +83,81 @@ def analyze_position(board, include_stats=False):
 
 def check_drawback_loss_conditions(board):
     """
-    Check if the current position has a loss condition based on active drawbacks.
+    Check if any active drawbacks have triggered a loss condition.
     
     Args:
-        board: DrawbackBoard position
+        board: The current chess board
         
     Returns:
         tuple: (has_loss, losing_color, reason) where:
-            - has_loss: True if a loss condition is detected
-            - losing_color: The color that lost (None if no loss)
-            - reason: A string describing the loss reason (None if no loss)
+            - has_loss is a boolean indicating if a loss condition was detected
+            - losing_color is the color that lost (chess.WHITE or chess.BLACK)
+            - reason is a string explaining the loss
     """
-    # Check both colors for potential loss conditions
+    # Check drawback loss conditions for each color
     for color in [chess.WHITE, chess.BLACK]:
-        # Get the active drawback for this color
-        drawback = board.get_active_drawback(color)
-        if not drawback:
+        # Skip if no drawback for this color
+        active_drawback = board.get_active_drawback(color)
+        if not active_drawback:
             continue
             
-        # Get the loss condition function for this drawback
-        loss_func = get_drawback_loss_function(drawback)
-        if not loss_func:
-            continue
-            
-        # Check if the loss condition is met
         try:
-            if loss_func(board, color):
-                return (True, color, f"{drawback} loss condition triggered")
+            # Special handling for atomic bomb
+            if active_drawback == "atomic_bomb":
+                # Critical checks for atomic bomb:
+                # 1. Must be the affected player's turn
+                if board.turn != color:
+                    print(f"ATOMIC BOMB LOSS CHECK: Skipping - not {color}'s turn")
+                    continue
+                    
+                # 2. There must be at least one move in the move stack
+                if len(board.move_stack) == 0:
+                    print("ATOMIC BOMB LOSS CHECK: Skipping - no moves in stack")
+                    continue
+                    
+                # 3. The last move must be a capture
+                last_move = board.move_stack[-1]
+                # For atomic bomb, directly check if the destination had a piece
+                was_capture = False
+                if hasattr(board, 'is_capture'):
+                    was_capture = board.is_capture(last_move)
+                else:
+                    # Manual capture check if board doesn't have is_capture method
+                    if last_move.to_square == board.ep_square:
+                        was_capture = True  # En passant is always a capture
+                    else:
+                        # We can't check if there was a piece before the move,
+                        # so this is a best-effort detection
+                        was_capture = True  # Assume it's a capture since we can't check properly
+                
+                if not was_capture:
+                    print(f"ATOMIC BOMB LOSS CHECK: Skipping - last move {last_move} was not a capture")
+                    continue
+                
+                print(f"ATOMIC BOMB LOSS CHECK: Checking if last capture was adjacent to {color} king")
+                
+                # Call the loss checker (returns tuple of has_lost, reason)
+                from GameState.drawbacks.atomic_bomb import check_explosion_loss
+                has_lost, reason = check_explosion_loss(board, color)
+                
+                if has_lost:
+                    print(f"ATOMIC BOMB CONFIRMED: The last capture was adjacent to the {color} king")
+                    return True, color, reason or "Atomic Bomb triggered - a piece was captured next to your king"
+                    
+            # For other drawbacks (legacy handling)
+            else:
+                drawback_module = DRAWBACKS.get(active_drawback, None)
+                if drawback_module and hasattr(drawback_module, "check_loss_condition"):
+                    if drawback_module.check_loss_condition(board, color):
+                        return True, color, f"{active_drawback} loss condition met"
+                        
         except Exception as e:
-            print(f"Error checking loss condition for {drawback}: {e}")
-    
-    # No loss conditions detected
-    return (False, None, None)
+            print(f"Error checking loss condition for {color} with drawback {active_drawback}: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    # No loss detected
+    return False, None, None
 
 def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_time_management=False, preserved_data=None):
     """

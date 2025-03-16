@@ -1,0 +1,20 @@
+{
+    "position": {
+        "name": "initial",
+        "custom_fen": ""
+    },
+    "drawbacks": {
+        "white": "",
+        "black": ""
+    },
+    "ai": {
+        "white_ai": false,
+        "black_ai": true,
+        "depth": 7,
+        "time_limit": 10,
+        "smart_time_management": true
+    },
+    "ui": {
+        "flip_board": false
+    }
+}

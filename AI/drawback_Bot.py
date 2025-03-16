@@ -10,7 +10,7 @@ from collections import namedtuple
 from GameState.movegen import DrawbackBoard
 from AI.evaluation import evaluate_position as eval_position
 from AI.piece_square_table import PIECE_VALUES
-from AI.search_utils import quiescence_search, negamax, Entry
+from AI.search_utils import quiescence_search, negamax, minimax, Entry, score_moves
 
 # Safe imports to avoid circular references
 try:
@@ -39,10 +39,31 @@ class DrawbackBot:
         self.depth = 0  # Current search depth - will be updated during search
         self.principal_variation = []  # Store the principal variation
         
+    def get_position_key(self, board):
+        """
+        Generate a unique key for the current board position for transposition table.
+        Uses zobrist hash if available, falls back to FEN string.
+        
+        Args:
+            board: The chess board position
+            
+        Returns:
+            A unique key for the position
+        """
+        # Use zobrist hash if available (more efficient)
+        if hasattr(board, 'zobrist_hash'):
+            return board.zobrist_hash()
+        # Fall back to FEN string (less efficient but unique)
+        return str(board.fen())
+        
     def evaluate_position(self, board, drawbacks=None):
         """Enhanced evaluation function that considers drawbacks"""
+        # Check variant win/loss conditions first for atomic bomb
+        if hasattr(board, 'is_variant_win') and board.is_variant_win():
+            return MATE_UPPER  # Definite win
+            
         # Check if the position is a variant loss due to drawbacks
-        if board.is_variant_loss():
+        if hasattr(board, 'is_variant_loss') and board.is_variant_loss():
             return -MATE_UPPER  # Return worst possible score
             
         # Get active drawback for current side
@@ -87,6 +108,48 @@ class DrawbackBot:
                 
                 # Bonus for having pieces that can capture lower-value targets
                 mobility_score += safe_captures * 15
+            
+            # Special case for atomic bomb
+            elif active_drawback == "atomic_bomb":
+                # Check if any captures would trigger a loss
+                king_square = None
+                for square, piece in board.piece_map().items():
+                    if piece and piece.piece_type == chess.KING and piece.color == board.turn:
+                        king_square = square
+                        break
+                
+                if king_square:
+                    # Evaluate danger level for king
+                    dangerous_squares = 0
+                    king_file, king_rank = chess.square_file(king_square), chess.square_rank(king_square)
+                    
+                    # Check each adjacent square
+                    for file_offset in [-1, 0, 1]:
+                        for rank_offset in [-1, 0, 1]:
+                            if file_offset == 0 and rank_offset == 0:
+                                continue  # Skip the king's own square
+                            
+                            target_file = king_file + file_offset
+                            target_rank = king_rank + rank_offset
+                            
+                            # Skip off-board squares
+                            if not (0 <= target_file < 8 and 0 <= target_rank < 8):
+                                continue
+                            
+                            target_square = chess.square(target_file, target_rank)
+                            piece = board.piece_at(target_square)
+                            
+                            # If adjacent square has our piece that can be captured
+                            if piece and piece.color == board.turn:
+                                attackers = board.attackers(not board.turn, target_square)
+                                defenders = board.attackers(board.turn, target_square)
+                                
+                                # If piece is attacked and not adequately defended
+                                if attackers and len(attackers) > len(defenders):
+                                    dangerous_squares += 1
+                    
+                    # Heavy penalty for each dangerous square - incentivize protecting king area
+                    mobility_score -= dangerous_squares * 40
         else:
             mobility_score = 0
         
@@ -109,131 +172,105 @@ class DrawbackBot:
         # Use regular evaluation + mobility and safety bonuses
         regular_eval = eval_position(board, drawbacks)
         
-        return regular_eval + mobility_score + safety_score
+        final_score = regular_eval + mobility_score + safety_score
         
-    def search(self, board, depth, time_limit=None, use_smart_time_management=False):
+        # Return score from current player's perspective
+        return final_score
+        
+    def search(self, board, depth, time_limit=10, use_smart_time_management=False, book_weights=None, prev_pv=None):
         """
-        Search for the best move in the current position to the specified depth.
-        Delegates to the negamax function for the actual search.
+        Iterative deepening search with optional time management.
+        Returns the best move and score from the current position.
         
         Args:
-            board: Current position
-            depth: Search depth
-            time_limit: Optional time limit in seconds
-            use_smart_time_management: If True, yield early if best move is stable
-                and reset time when a new best move is found
+            board: Board position
+            depth: Maximum search depth
+            time_limit: Time limit in seconds
+            use_smart_time_management: Enable smart time management
+            book_weights: Dictionary of book move weights
+            prev_pv: Previous principal variation
             
         Returns:
-            Tuple of (score, best_move)
+            tuple of (score, best move)
         """
-        global current_best_move, current_best_score
+        # Initialize
+        best_move = None
+        best_score = float('-inf') if board.turn == chess.WHITE else float('inf')  # Different default for each side
+        start_time = time.time()
+        start_overall = start_time
         
-        # Reset global tracking variables
-        current_best_move = None
-        current_best_score = None
+        # Initialize stability tracking for smart time management
+        stable_move_threshold = 1.0  # 1 second of stability before early exit
+        stable_move_start_time = None
+        last_best_move = None
         
-        # Reset node counter
+        # Restore principal variation from previous search if available
+        if prev_pv:
+            self.principal_variation = prev_pv.copy()
+        
+        # Set default book weights if none provided
+        if not book_weights:
+            book_weights = {}
+        
+        # Prepare for Iterative Deepening
         self.nodes = 0
         
-        # Reset cached data for new search
-        self.tt = {}
-        self.history = {}
-        self.killers = [[None, None] for _ in range(MAX_DEPTH + 1)]  # Reset killers for all depths
-        self.eval_cache = {}
-        
-        # Reset principal variation
-        self.principal_variation = []
-        
-        # Starting values for search
-        best_move = None
-        best_score = -MATE_UPPER
-        start_overall = time.time()
-        
-        # Smart time management variables
-        last_best_move = None
-        stable_move_start_time = None
-        stable_move_threshold = 10.0  # Seconds to wait before accepting a stable move
-        
-        # Set initial depth attribute for move_value function
-        self.depth = 0  # Start at 0, will be updated in the loop
-        
-        # Ensure we have a reasonable time limit
-        if time_limit is None or time_limit <= 0:
-            time_limit = 5.0  # Default to 5 seconds
-        
-        print(f"Starting iterative deepening search with max depth {depth} and time limit {time_limit}s")
-        
         try:
+            # Perform iterative deepening search
             for current_depth in range(1, depth + 1):
-                # Update depth attribute for killer moves in move_value
+                # Store the current depth for access from elsewhere
                 self.depth = current_depth
                 
-                start_time = time.time()
+                # Reset node count for this iteration
+                iter_nodes_start = self.nodes
                 
-                # More generous time allocation - allow using up to 95% of time limit
-                elapsed_overall = time.time() - start_overall
-                if elapsed_overall > time_limit * 0.95:  # Use 95% of time limit as cutoff
-                    print(f"Time limit approaching after depth {current_depth-1}, stopping search")
-                    break
-                    
-                # Calculate remaining time for this depth - allow more time for deeper depths
-                # Give at least 25% of remaining time to the current depth
-                remaining_time = max(0.2, time_limit - elapsed_overall)
-                time_for_depth = max(remaining_time * 0.25, 0.2)
-                
-                # Use aspiration windows for deeper searches
-                if current_depth >= 3:
-                    # Start with previous best score plus a small window
-                    alpha = max(-MATE_UPPER, best_score - 50)
-                    beta = min(MATE_UPPER, best_score + 50)
-                    
-                    # First attempt with narrow window
-                    try:
-                        score = negamax(self, board, current_depth, alpha, beta, start_time=start_overall, time_limit=time_limit)
-                        
-                        # If score outside window, re-search with full window
-                        if score <= alpha or score >= beta:
-                            # Check time limit again before researching
-                            if time.time() - start_overall > time_limit * 0.98:
-                                print(f"Time limit nearly reached during aspiration window retry at depth {current_depth}")
-                                break
-                                
-                            alpha = -MATE_UPPER
-                            beta = MATE_UPPER
-                            score = negamax(self, board, current_depth, alpha, beta, start_time=start_overall, time_limit=time_limit)
-                    except TimeoutError:
-                        print(f"Search timed out at depth {current_depth}")
-                        break
-                    except Exception as e:
-                        print(f"Error in search at depth {current_depth}: {e}")
-                        # If an error occurs, use previous best move/score and continue
-                        continue
+                # Base initial window on previous iteration's score for stability
+                # On the first iteration or if best_move is None, use a full window
+                if best_move is None:
+                    # Initial window is wide open
+                    window_alpha = float('-inf') if board.turn == chess.WHITE else float('inf')
+                    window_beta = float('inf') if board.turn == chess.WHITE else float('-inf')
                 else:
-                    # Full window for shallow searches
-                    try:
-                        score = negamax(self, board, current_depth, -MATE_UPPER, MATE_UPPER, start_time=start_overall, time_limit=time_limit)
-                    except TimeoutError:
-                        print(f"Search timed out at depth {current_depth}")
-                        break
-                    except Exception as e:
-                        print(f"Error in search at depth {current_depth}: {e}")
-                        # If an error occurs, use previous best move/score and continue
-                        continue
+                    # Set aspiration window for the next iteration
+                    window_size = 50.0  # Centipawns
+                    window_alpha = best_score - window_size if board.turn == chess.WHITE else best_score - window_size
+                    window_beta = best_score + window_size if board.turn == chess.WHITE else best_score + window_size
                 
-                # Get the best move from the transposition table
+                # Start this iteration's search
+                try:
+                    # Use negamax search which alternates perspective
+                    if current_depth <= 4:  # Deeper searches sometimes benefit from aspiration windows
+                        # For shallow depths, use a full window to avoid research
+                        score = negamax(self, board, current_depth, float('-inf'), float('inf'), 
+                                    True, True, start_time, time_limit)
+                    else:
+                        # Try with aspiration window first
+                        try:
+                            score = negamax(self, board, current_depth, window_alpha, window_beta, 
+                                        True, True, start_time, time_limit)
+                        except ValueError:
+                            # If window is too tight, research with full window
+                            print(f"Score {score} outside aspiration window [{window_alpha}, {window_beta}], researching with full window")
+                            score = negamax(self, board, current_depth, float('-inf'), float('inf'), 
+                                        True, True, start_time, time_limit)
+                except TimeoutError:
+                    # If timeout occurred during search, use the best move from previous iteration
+                    print(f"Search timed out at depth {current_depth}")
+                    break
+                
+                # Try to extract the best move from the transposition table
+                key = self.get_position_key(board)
                 current_best_move_local = None
                 
-                # Look for the best move in the tt
-                pos_key = self.get_position_key(board)
-                if pos_key in self.tt:
-                    entry = self.tt[pos_key]
-                    if entry.move:
-                        # Convert UCI string to Move object
-                        entry_move_uci = entry.move
-                        for legal_move in board.legal_moves:
-                            if legal_move.uci() == entry_move_uci:
-                                current_best_move_local = legal_move
-                                break
+                if key in self.tt:
+                    tt_entry = self.tt[key]
+                    entry_move_uci = tt_entry.move
+                    
+                    # Convert UCI string to Move object
+                    for legal_move in board.legal_moves:
+                        if legal_move.uci() == entry_move_uci:
+                            current_best_move_local = legal_move
+                            break
                 
                 # Calculate search time for this iteration
                 elapsed = time.time() - start_time
@@ -256,7 +293,7 @@ class DrawbackBot:
                                     print(f"Best move {current_best_move_local.uci()} has been stable for {stable_duration:.2f}s, early termination")
                                     break
                         else:
-                            # Move changed, reset stability timer and extend search time by resetting start_overall
+                            # Move changed, reset stability timer and extend search time
                             stable_move_start_time = None
                             if last_best_move is not None:  # Only if we had a previous best move
                                 print(f"New best move found: {current_best_move_local.uci()}, extending search time")
@@ -268,8 +305,17 @@ class DrawbackBot:
                     
                     # Remember this move for stability tracking
                     last_best_move = current_best_move_local
-                    best_move = current_best_move_local
-                    best_score = score
+                    
+                    # Update best move if this is better than previous best
+                    if board.turn == chess.WHITE:
+                        if score > best_score:
+                            best_move = current_best_move_local
+                            best_score = score
+                    else:
+                        # For BLACK, lower scores are better (evaluation is from white's perspective)
+                        if score < best_score:
+                            best_move = current_best_move_local
+                            best_score = score
                     
                     # Always update global variables with the current best move
                     current_best_move = best_move
@@ -495,13 +541,6 @@ class DrawbackBot:
         print(f"Search complete. Chosen move: {move.uci()}")
         return move
     
-    def get_position_key(self, board):
-        """Get a unique key for the position, preferring Zobrist hash if available."""
-        if hasattr(board, 'zobrist_hash'):
-            return board.zobrist_hash()
-        else:
-            return str(board.fen())
-
     def extract_principal_variation(self, board, first_move, max_depth=10):
         """
         Extract the principal variation from the transposition table
@@ -564,6 +603,11 @@ def best_move(board, depth=3, time_limit=5, book_move_bonuses=None):
     Returns:
         Best move object or None if no move available
     """
+    # Reset global tracking variables to avoid search state leaking between players
+    global current_best_move, current_best_score
+    current_best_move = None
+    current_best_score = None
+    
     engine = DrawbackBot()
     
     # If book move bonuses are provided, set them in the engine

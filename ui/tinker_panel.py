@@ -3,6 +3,7 @@ import sys
 import os
 import chess
 from GameState.drawback_manager import get_drawback_info, DRAWBACKS
+from GameState.state_manager import game_state_manager
 from ui.components import Button, Checkbox, Slider, SearchBox
 from ui.drawback_list import DrawbackList
 

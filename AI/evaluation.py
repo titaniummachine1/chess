@@ -141,6 +141,8 @@ def evaluate_position_standard(board):
     score += evaluate_center_control(board)
     score += evaluate_opening_structure(board)
     
+    # Return the score from perspective of player to move
+    # This ensures White tries to maximize, Black tries to minimize
     return score if board.turn == chess.WHITE else -score
 
 def evaluate_pawn_structure(board, phase):

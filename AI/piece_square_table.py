@@ -144,30 +144,31 @@ piece_square_tables = {
 
 # Pre-compute the black piece tables by mirroring white tables
 def precompute_black_tables():
-    """Create flipped tables for black pieces to avoid runtime transformations"""
+    """Create flipped tables for black pieces by mirroring positions and negating values"""
     piece_square_tables["black"]["mg"] = {}
     piece_square_tables["black"]["eg"] = {}
     
     for piece in piece_square_tables["white"]["mg"]:
-        piece_square_tables["black"]["mg"][piece] = []
-        piece_square_tables["black"]["eg"][piece] = []
+        # Initialize empty lists for black's tables
+        piece_square_tables["black"]["mg"][piece] = [0] * 64
+        piece_square_tables["black"]["eg"][piece] = [0] * 64
         
         # For each position in the 8x8 board
-        for rank in range(8):
-            for file in range(8):
-                # Get original square index
-                sq = rank * 8 + file
-                # Get mirrored square index (flip rank)
-                mirror_rank = 7 - rank
-                mirror_sq = mirror_rank * 8 + file
-                
-                # Copy the value from the mirrored position
-                mg_value = piece_square_tables["white"]["mg"][piece][mirror_sq]
-                eg_value = piece_square_tables["white"]["eg"][piece][mirror_sq]
-                
-                # Add to black's table
-                piece_square_tables["black"]["mg"][piece].append(mg_value)
-                piece_square_tables["black"]["eg"][piece].append(eg_value)
+        for sq in range(64):
+            rank = sq // 8
+            file = sq % 8
+            
+            # Get the vertically mirrored square (flip rank)
+            mirror_rank = 7 - rank
+            mirror_sq = mirror_rank * 8 + file
+            
+            # Get the values from white's tables and negate them
+            mg_value = -piece_square_tables["white"]["mg"][piece][mirror_sq]
+            eg_value = -piece_square_tables["white"]["eg"][piece][mirror_sq]
+            
+            # Store the negated values at the original square
+            piece_square_tables["black"]["mg"][piece][sq] = mg_value
+            piece_square_tables["black"]["eg"][piece][sq] = eg_value
 
 # Run the precomputation during module initialization
 precompute_black_tables()

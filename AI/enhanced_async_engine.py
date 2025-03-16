@@ -377,5 +377,9 @@ def reset_search():
     # Reset all state variables
     engine_state.reset()
     
+    # Clear all search knowledge when resetting between different players
+    # This is critical to avoid perspective inconsistencies
+    engine_state.clear_search_knowledge()
+    
     # Give a short moment for task cleanup
     time.sleep(0.1) 

@@ -1,10 +1,11 @@
 ## movegen.py contains the custom board class for Drawback Chess, which extends the standard python-chess board class.
-import chess
-import random
-from typing import Iterator, Optional, List, Union
+from typing import Iterator, Optional, List, Union, Dict, Set
 from GameState.drawback_manager import (
     get_drawback_info, get_drawback_function, get_drawback_loss_function
 )
+from collections import Counter
+import chess
+import random
 
 class DrawbackBoard(chess.Board):
     """
@@ -12,21 +13,42 @@ class DrawbackBoard(chess.Board):
       - Standard starting FEN (white on bottom, black on top).
       - Ignores checks, can capture king.
       - Drawback-based restrictions.
+      - Implements 3-fold repetition.
+      - Implements insufficient material draws using chess.com rules.
+      - Implements king en passant capture during castling.
     """
 
     def __init__(self, fen: str = chess.STARTING_FEN, white_drawback: Optional[str] = None, black_drawback: Optional[str] = None):
+        """
+        Initialize the board with optional white and black drawbacks
+        
+        Args:
+            fen: The FEN string to initialize the board with
+            white_drawback: The name of the drawback for the white player (None for no drawback)
+            black_drawback: The name of the drawback for the black player (None for no drawback)
+        """
         super().__init__(fen)
         self._white_drawback = white_drawback
         self._black_drawback = black_drawback
         self._in_search = False  # Flag to indicate when we're in a search context
         self._last_moved_piece = None
         self._last_capture_square = None
+        self._position_history = []  # Track position history for 3-fold repetition
+        self._castling_king_passed_squares = []  # Track squares king passed during castling
+        self._lastmove_was_capture = False
+        self._lastmove_captured_piece = None
+        self._move_history = []  # List of (move, was_capture, captured_piece)
 
     def reset(self, fen: str = chess.STARTING_FEN) -> None:
         """Reset the board to the starting position"""
         super().reset()
         self._white_drawback = None
         self._black_drawback = None
+        self._position_history = []
+        self._castling_king_passed_squares = []
+        self._lastmove_was_capture = False
+        self._lastmove_captured_piece = None
+        self._move_history = []
 
     def set_white_drawback(self, drawback: Optional[str]) -> None:
         """Set the white drawback"""
@@ -63,26 +85,62 @@ class DrawbackBoard(chess.Board):
         return chess.LegalMoveGenerator(self)
 
     def generate_legal_moves(self, from_mask: chess.Bitboard = chess.BB_ALL, to_mask: chess.Bitboard = chess.BB_ALL) -> Iterator[chess.Move]:
-        """Generate legal moves considering drawbacks"""
-        # Get standard chess moves first
-        moves = list(super().generate_pseudo_legal_moves(from_mask, to_mask))
-        
-        # Apply drawback restrictions
-        active_drawback = self.get_active_drawback(self.turn)
-        if active_drawback:
-            filtered_moves = []
-            for move in moves:
-                # Use direct drawback check to avoid recursion
-                if self._check_drawbacks(move, self.turn):
-                    filtered_moves.append(move)
-            return iter(filtered_moves)
+        """
+        Generate legal moves modified for Drawback Chess, including king en passant capture.
+        """
+        # Generate standard pseudo-legal moves
+        for move in self.generate_pseudo_legal_moves(from_mask, to_mask):
+            # Skip moves that violate the active drawback
+            if self._is_drawback_illegal(move, self.turn):
+                continue
                 
-        return iter(moves)
+            yield move
+            
+        # Add king en passant captures if available and if king castled last move
+        if self._castling_king_passed_squares:
+            for passed_square in self._castling_king_passed_squares:
+                # Get the rank and file of the passed square
+                rank = chess.square_rank(passed_square)
+                file = chess.square_file(passed_square)
+                
+                # Check horizontally adjacent squares (same rank, adjacent files)
+                for file_offset in [-1, 1]:
+                    adj_file = file + file_offset
+                    if 0 <= adj_file < 8:  # Ensure file is on board
+                        adj_square = chess.square(adj_file, rank)
+                        
+                        # Check if there's a piece there that belongs to the current player
+                        piece = self.piece_at(adj_square)
+                        if piece and piece.color == self.turn:
+                            # Create a special "king en passant" capture move
+                            en_passant_move = chess.Move(adj_square, passed_square)
+                            
+                            # Check if this move would violate the active drawback
+                            if not self._is_drawback_illegal(en_passant_move, self.turn):
+                                yield en_passant_move
+                
+                # Check all squares on the same file (vertical captures from any distance)
+                for check_rank in range(8):
+                    if check_rank == rank:  # Skip the passed square itself
+                        continue
+                        
+                    check_square = chess.square(file, check_rank)
+                    
+                    # Check if there's a piece there that belongs to the current player
+                    piece = self.piece_at(check_square)
+                    if piece and piece.color == self.turn:
+                        # Create a special "king en passant" capture move
+                        en_passant_move = chess.Move(check_square, passed_square)
+                        
+                        # Check if this move would violate the active drawback
+                        if not self._is_drawback_illegal(en_passant_move, self.turn):
+                            yield en_passant_move
 
     def is_variant_end(self) -> bool:
         """
         In Drawback Chess, the game ends when one of the kings is captured,
-        or when a player has no legal moves due to drawback restrictions.
+        when a player has no legal moves due to drawback restrictions,
+        or when standard draw conditions are met (3-fold repetition, insufficient material).
         """
         # Check if kings are captured - direct board inspection to avoid recursion
         white_king_alive = False
@@ -102,6 +160,14 @@ class DrawbackBoard(chess.Board):
 
         # Game ends when a king is captured
         if not white_king_alive or not black_king_alive:
+            return True
+
+        # Check for 3-fold repetition
+        if self.is_threefold_repetition():
+            return True
+            
+        # Check for insufficient material
+        if self.has_insufficient_material():
             return True
 
         # Check for special drawback-related loss conditions
@@ -141,26 +207,44 @@ class DrawbackBoard(chess.Board):
                 print(f"No legal moves available due to drawback '{active_drawback}' - game ends")
                 return True
                     
-        # No other end conditions - you must capture the king to win
+        # No other end conditions
         return False
 
     def is_variant_win(self) -> bool:
         """
-        In Drawback Chess, you win by capturing the opponent's king.
+        In Drawback Chess, you win by capturing the opponent's king
+        or if the opponent has no legal moves.
         """
-        white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
-                               for p in self.piece_map().values())
-        black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
-                               for p in self.piece_map().values())
-
-        # White wins if Black's king is captured
-        if not black_king_alive:
-            return True
-        # Black wins if White's king is captured    
-        if not white_king_alive:
-            return False
+        # Check if opponent lost their king
+        if self.turn == chess.WHITE:
+            # White's turn - check if Black's king is gone
+            black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
+                                 for p in self.piece_map().values())
+            if not black_king_alive:
+                return True
+        else:
+            # Black's turn - check if White's king is gone
+            white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
+                                 for p in self.piece_map().values())
+            if not white_king_alive:
+                return True
+        
+        # Check if opponent has no legal moves due to drawback
+        opponent_color = not self.turn
+        opponent_drawback = self.get_active_drawback(opponent_color)
+        
+        if opponent_drawback:
+            # Create a hypothetical board with opponent's turn
+            test_board = self.copy()
+            test_board.turn = opponent_color
             
-        # No win yet if both kings are alive
+            # Check if there are any legal moves
+            legal_moves_exist = any(True for _ in test_board.legal_moves)
+            
+            if not legal_moves_exist:
+                # Opponent has no legal moves - current player wins
+                return True
+        
         return False
 
     def is_variant_loss(self) -> bool:
@@ -168,63 +252,169 @@ class DrawbackBoard(chess.Board):
         In Drawback Chess, you lose when:
         1. Your king is captured
         2. You have no legal moves due to drawback restrictions
-        3. A drawback-specific loss condition is met
         """
-        # Skip this check during AI search to improve performance
-        if self._in_search:
-            # Only do basic king capture check during search
+        # Check if current player's king is gone
+        if self.turn == chess.WHITE:
             white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
                                  for p in self.piece_map().values())
+            if not white_king_alive:
+                return True
+        else:
             black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
                                  for p in self.piece_map().values())
-                             
-            if not white_king_alive and self.turn == chess.WHITE:
-                return True  # White's king captured, white loses
-            if not black_king_alive and self.turn == chess.BLACK:
-                return True  # Black's king captured, black loses
+            if not black_king_alive:
+                return True
                 
-            return False
-                                 
-        # First directly check for king capture without using is_variant_end
-        white_king_alive = any(p.piece_type == chess.KING and p.color == chess.WHITE
-                             for p in self.piece_map().values())
-        black_king_alive = any(p.piece_type == chess.KING and p.color == chess.BLACK
-                             for p in self.piece_map().values())
-                             
-        if not white_king_alive and self.turn == chess.WHITE:
-            return True  # White's king captured, white loses
-        if not black_king_alive and self.turn == chess.BLACK:
-            return True  # Black's king captured, black loses
-        
-        # Check for drawback loss conditions directly
+        # Check if current player has no legal moves due to drawback
         active_drawback = self.get_active_drawback(self.turn)
         if active_drawback:
-            # Import here to avoid circular imports
-            from GameState.drawback_manager import get_drawback_loss_function
+            legal_moves_exist = any(True for _ in self.legal_moves)
+            if not legal_moves_exist:
+                # Current player has no legal moves - current player loses
+                return True
+                
+        return False
+
+    def is_variant_draw(self) -> bool:
+        """
+        In Drawback Chess, draws occur in the following cases:
+        1. Threefold repetition
+        2. Insufficient material
+        """
+        # Check for threefold repetition
+        if self.is_threefold_repetition():
+            return True
             
-            loss_function = get_drawback_loss_function(active_drawback)
-            if loss_function and loss_function(self, self.turn):
-                return True  # Explicit loss condition triggered
-            
-            # Check for legal moves directly without recursion
-            has_legal_moves = False
-            for move in super().generate_pseudo_legal_moves():
-                if not self._is_drawback_illegal(move, self.turn):
-                    has_legal_moves = True
-                    break
-            
-            if not has_legal_moves:
-                return True  # No legal moves due to drawback
+        # Check for insufficient material
+        if self.has_insufficient_material():
+            return True
             
         return False
 
-    def is_legal(self, move: chess.Move) -> bool:
-        """Enhanced is_legal that incorporates drawback rules"""
-        # Basic legality check first
-        if not super().is_legal(move):
+    def is_threefold_repetition(self) -> bool:
+        """
+        Override the threefold repetition detection to use our custom position tracking
+        and avoid recursion with has_legal_en_passant.
+        """
+        # Use our own position history tracking instead of the parent's implementation
+        if not self._position_history:
             return False
             
-        # Use direct drawback check to avoid recursion
+        # Count positions
+        positions = {}
+        for position in self._position_history:
+            positions[position] = positions.get(position, 0) + 1
+            
+        # Get current position without using epd() to avoid recursion
+        current_position = self.board_fen()
+        positions[current_position] = positions.get(current_position, 0) + 1
+        
+        # Check if any position appears 3 or more times
+        for count in positions.values():
+            if count >= 3:
+                return True
+                
+        return False
+    
+    def has_insufficient_material(self) -> bool:
+        """
+        Check if the position has insufficient material to checkmate.
+        Implements chess.com rules for insufficient material:
+        - King vs King
+        - King and Bishop vs King
+        - King and Knight vs King
+        - King and Bishop vs King and Bishop (same color bishops)
+        """
+        # Count pieces by type and color
+        white_pieces = {chess.PAWN: 0, chess.KNIGHT: 0, chess.BISHOP: 0, chess.ROOK: 0, chess.QUEEN: 0}
+        black_pieces = {chess.PAWN: 0, chess.KNIGHT: 0, chess.BISHOP: 0, chess.ROOK: 0, chess.QUEEN: 0}
+        white_bishop_squares = []
+        black_bishop_squares = []
+        
+        for square, piece in self.piece_map().items():
+            if piece.piece_type == chess.KING:
+                continue  # Skip kings
+                
+            if piece.color == chess.WHITE:
+                white_pieces[piece.piece_type] += 1
+                # Track bishop square
+                if piece.piece_type == chess.BISHOP:
+                    white_bishop_squares.append(square)
+            else:
+                black_pieces[piece.piece_type] += 1
+                # Track bishop square
+                if piece.piece_type == chess.BISHOP:
+                    black_bishop_squares.append(square)
+        
+        # Early exit if any pawns, rooks, or queens exist
+        if (white_pieces[chess.PAWN] > 0 or white_pieces[chess.ROOK] > 0 or white_pieces[chess.QUEEN] > 0 or
+            black_pieces[chess.PAWN] > 0 or black_pieces[chess.ROOK] > 0 or black_pieces[chess.QUEEN] > 0):
+            return False
+        
+        # Count total pieces (excluding kings)
+        white_total = sum(white_pieces.values())
+        black_total = sum(black_pieces.values())
+        
+        # Case 1: King vs King
+        if white_total == 0 and black_total == 0:
+            return True
+            
+        # Case 2: King and Bishop vs King or King and Knight vs King
+        if (white_total == 1 and black_total == 0) or (white_total == 0 and black_total == 1):
+            # Check if the piece is a bishop or knight
+            if (white_pieces[chess.BISHOP] == 1 or white_pieces[chess.KNIGHT] == 1 or
+                black_pieces[chess.BISHOP] == 1 or black_pieces[chess.KNIGHT] == 1):
+                return True
+            
+        # Case 3: King and Bishop vs King and Bishop (same color bishops)
+        if (white_pieces[chess.BISHOP] == 1 and black_pieces[chess.BISHOP] == 1 and
+            white_total == 1 and black_total == 1):
+            # Get the square colors
+            white_square = white_bishop_squares[0]
+            black_square = black_bishop_squares[0]
+            
+            # Check if bishops are on same color squares
+            # A square is light if the sum of its file and rank is even
+            white_square_color = (chess.square_file(white_square) + chess.square_rank(white_square)) % 2
+            black_square_color = (chess.square_file(black_square) + chess.square_rank(black_square)) % 2
+            
+            # If both bishops are on the same color squares, it's a draw
+            if white_square_color == black_square_color:
+                return True
+            else:
+                return False
+        
+        return False
+
+    def is_legal(self, move: chess.Move) -> bool:
+        """
+        In Drawback Chess, a move is legal if:
+        1. It's a valid chess move (pseudo-legal)
+        2. It doesn't violate the player's drawback
+        
+        Check and checkmate don't exist in this variant.
+        """
+        # Special case for king en passant capture
+        if move.to_square in self._castling_king_passed_squares:
+            piece = self.piece_at(move.from_square)
+            if piece and piece.color == self.turn:
+                from_file = chess.square_file(move.from_square)
+                to_file = chess.square_file(move.to_square)
+                from_rank = chess.square_rank(move.from_square)
+                to_rank = chess.square_rank(move.to_square)
+                
+                horizontal_capture = from_rank == to_rank and abs(from_file - to_file) == 1
+                vertical_capture = from_file == to_file
+                
+                if horizontal_capture or vertical_capture:
+                    # Only check drawback restrictions
+                    return self._check_drawbacks(move, self.turn)
+        
+        # Check if the move is a valid chess move (pseudo-legal)
+        if not self.is_pseudo_legal(move):
+            return False
+            
+        # Check drawback restrictions
         return self._check_drawbacks(move, self.turn)
         
     def _is_drawback_illegal(self, move: chess.Move, color: chess.Color) -> bool:
@@ -263,7 +453,28 @@ class DrawbackBoard(chess.Board):
         return new_board
 
     def _is_pseudo_legal(self, move: chess.Move) -> bool:
-        """Check if a move is pseudo-legal without causing recursion"""
+        """
+        Check if a move is pseudo-legal without causing recursion.
+        Also handles the special king en passant capture.
+        """
+        # Special case: King en passant capture check
+        if move.to_square in self._castling_king_passed_squares:
+            # This is a potential king en passant capture
+            piece = self.piece_at(move.from_square)
+            
+            # Check if the piece belongs to the current player
+            if piece and piece.color == self.turn:
+                # The piece must be adjacent to the king's path
+                from_file = chess.square_file(move.from_square)
+                to_file = chess.square_file(move.to_square)
+                from_rank = chess.square_rank(move.from_square)
+                to_rank = chess.square_rank(move.to_square)
+                
+                # The piece must be on the same rank and one file away
+                if from_rank == to_rank and abs(from_file - to_file) == 1:
+                    return True
+        
+        # Regular move legality check
         # Get the piece at the from-square
         piece = self.piece_at(move.from_square)
         
@@ -271,28 +482,143 @@ class DrawbackBoard(chess.Board):
         if not piece or piece.color != self.turn:
             return False
             
-        # Check if the move is valid for the piece type (simplified)
-        # This is a basic implementation - the full chess rules would be more complex
+        # Check if the move is valid for the piece type
         if piece.piece_type == chess.PAWN:
-            # Simplified pawn move check
             return self._is_pawn_move_pseudo_legal(move)
-        elif piece.piece_type == chess.KNIGHT:
-            # Knight move check - calculate offset
-            from_rank, from_file = chess.square_rank(move.from_square), chess.square_file(move.from_square)
-            to_rank, to_file = chess.square_rank(move.to_square), chess.square_file(move.to_square)
+        elif piece.piece_type == chess.KING:
+            # Kings can move one square in any direction or castle
+            from_file = chess.square_file(move.from_square)
+            to_file = chess.square_file(move.to_square)
+            from_rank = chess.square_rank(move.from_square)
+            to_rank = chess.square_rank(move.to_square)
             
-            rank_diff = abs(to_rank - from_rank)
-            file_diff = abs(to_file - from_file)
+            # Normal king move: one square in any direction
+            if max(abs(from_file - to_file), abs(from_rank - to_rank)) <= 1:
+                # Cannot capture own pieces
+                target = self.piece_at(move.to_square)
+                return target is None or target.color != piece.color
+                
+            # Castling: king moves two squares horizontally
+            elif from_rank == to_rank and abs(from_file - to_file) == 2:
+                # Check if castling is possible (rook in place, path clear)
+                if to_file > from_file:  # Kingside
+                    # Check if path is clear
+                    if any(self.piece_at(chess.square(file, from_rank)) 
+                          for file in range(from_file + 1, 7)):
+                        return False
+                    # Check if rook is in place
+                    rook_square = chess.square(7, from_rank)
+                    rook = self.piece_at(rook_square)
+                    return (rook and rook.piece_type == chess.ROOK and rook.color == piece.color)
+                else:  # Queenside
+                    # Check if path is clear
+                    if any(self.piece_at(chess.square(file, from_rank)) 
+                          for file in range(1, from_file)):
+                        return False
+                    # Check if rook is in place
+                    rook_square = chess.square(0, from_rank)
+                    rook = self.piece_at(rook_square)
+                    return (rook and rook.piece_type == chess.ROOK and rook.color == piece.color)
+            else:
+                return False
+        else:
+            # For other pieces, delegate to parent class
+            try:
+                return super()._is_pseudo_legal(move)
+            except (RecursionError, RuntimeError):
+                # Fallback to simplified check if the parent method causes recursion
+                return self._simplified_piece_move_check(piece, move)
+                
+    def _simplified_piece_move_check(self, piece, move):
+        """Simplified move check for pieces if the parent method fails"""
+        # Cannot capture own pieces
+        target = self.piece_at(move.to_square)
+        if target and target.color == piece.color:
+            return False
             
-            # Knight moves in L-shape: 2 squares in one direction, 1 in the other
-            return (rank_diff == 2 and file_diff == 1) or (rank_diff == 1 and file_diff == 2)
-        elif piece.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN, chess.KING]:
-            # For these pieces, we'll use a simplified check that just ensures
-            # we're not trying to move to a square occupied by our own piece
-            target = self.piece_at(move.to_square)
-            return target is None or target.color != piece.color
+        from_file = chess.square_file(move.from_square)
+        to_file = chess.square_file(move.to_square)
+        from_rank = chess.square_rank(move.from_square)
+        to_rank = chess.square_rank(move.to_square)
+        
+        # Knight: L-shaped move
+        if piece.piece_type == chess.KNIGHT:
+            return (abs(from_file - to_file) == 2 and abs(from_rank - to_rank) == 1 or
+                    abs(from_file - to_file) == 1 and abs(from_rank - to_rank) == 2)
+                    
+        # Bishop: diagonal movement
+        elif piece.piece_type == chess.BISHOP:
+            if abs(from_file - to_file) != abs(from_rank - to_rank):
+                return False
+                
+            # Check if path is clear
+            step_file = 1 if to_file > from_file else -1
+            step_rank = 1 if to_rank > from_rank else -1
             
-        return True  # Default to true for other cases
+            check_file, check_rank = from_file + step_file, from_rank + step_rank
+            while check_file != to_file and check_rank != to_rank:
+                if self.piece_at(chess.square(check_file, check_rank)) is not None:
+                    return False
+                check_file += step_file
+                check_rank += step_rank
+                
+            return True
+            
+        # Rook: horizontal/vertical movement
+        elif piece.piece_type == chess.ROOK:
+            if from_file != to_file and from_rank != to_rank:
+                return False
+                
+            # Check if path is clear
+            if from_file == to_file:  # Vertical movement
+                step = 1 if to_rank > from_rank else -1
+                for check_rank in range(from_rank + step, to_rank, step):
+                    if self.piece_at(chess.square(from_file, check_rank)) is not None:
+                        return False
+            else:  # Horizontal movement
+                step = 1 if to_file > from_file else -1
+                for check_file in range(from_file + step, to_file, step):
+                    if self.piece_at(chess.square(check_file, from_rank)) is not None:
+                        return False
+                        
+            return True
+            
+        # Queen: combined bishop and rook movement
+        elif piece.piece_type == chess.QUEEN:
+            # Diagonal movement (like bishop)
+            if abs(from_file - to_file) == abs(from_rank - to_rank):
+                # Check if path is clear
+                step_file = 1 if to_file > from_file else -1
+                step_rank = 1 if to_rank > from_rank else -1
+                
+                check_file, check_rank = from_file + step_file, from_rank + step_rank
+                while check_file != to_file and check_rank != to_rank:
+                    if self.piece_at(chess.square(check_file, check_rank)) is not None:
+                        return False
+                    check_file += step_file
+                    check_rank += step_rank
+                    
+                return True
+                
+            # Horizontal/vertical movement (like rook)
+            elif from_file == to_file or from_rank == to_rank:
+                if from_file == to_file:  # Vertical movement
+                    step = 1 if to_rank > from_rank else -1
+                    for check_rank in range(from_rank + step, to_rank, step):
+                        if self.piece_at(chess.square(from_file, check_rank)) is not None:
+                            return False
+                else:  # Horizontal movement
+                    step = 1 if to_file > from_file else -1
+                    for check_file in range(from_file + step, to_file, step):
+                        if self.piece_at(chess.square(check_file, from_rank)) is not None:
+                            return False
+                            
+                return True
+                
+            else:
+                return False
+                
+        return False
 
     def _is_pawn_move_pseudo_legal(self, move: chess.Move) -> bool:
         """Check if a pawn move is pseudo-legal without recursion"""
@@ -344,36 +670,66 @@ class DrawbackBoard(chess.Board):
 
     def push(self, move: chess.Move) -> None:
         """
-        Enhanced push that tracks additional information needed for drawbacks.
-        This method extends the standard push to track additional state.
+        Enhanced push that tracks additional information needed for drawbacks
+        and implements king en passant capture during castling.
         """
         # Track information before making the move
         moving_piece = self.piece_at(move.from_square)
         target_piece = self.piece_at(move.to_square)
         is_capture = target_piece is not None
         
+        # Check for castling to implement king en passant
+        castling_move = False
+        self._castling_king_passed_squares = []  # Reset passed squares
+        
+        if (moving_piece and moving_piece.piece_type == chess.KING and 
+            abs(chess.square_file(move.from_square) - chess.square_file(move.to_square)) > 1):
+            # This is a castling move
+            castling_move = True
+            rank = chess.square_rank(move.from_square)
+            from_file = chess.square_file(move.from_square)
+            to_file = chess.square_file(move.to_square)
+            
+            # Store the square the king passes through during castling
+            # (this square can be used for en passant capture of the king)
+            passed_file = from_file + (1 if to_file > from_file else -1)
+            passed_square = chess.square(passed_file, rank)
+            self._castling_king_passed_squares.append(passed_square)
+        
         # Execute the move using the parent method
         super().push(move)
         
+        # Store current position for 3-fold repetition detection AFTER making the move
+        position_key = self.epd()
+        self._position_history.append(position_key)
+        
         # Store the last moved piece and capture information
         self._last_moved_piece = moving_piece
+        
+        # Handle piece capture tracking
         if is_capture:
             self._last_capture_square = move.to_square
+            self._lastmove_was_capture = True
+            self._lastmove_captured_piece = target_piece
         else:
             self._last_capture_square = None
-            
+            self._lastmove_was_capture = False
+            self._lastmove_captured_piece = None
+
     def pop(self) -> chess.Move:
         """
-        Enhanced pop that clears the tracked move information.
+        Enhanced pop that clears the tracked move information and
+        removes the last position from history.
         """
+        # Remove the last position from history
+        if self._position_history:
+            self._position_history.pop()
+            
+        # Reset king passed squares from castling
+        self._castling_king_passed_squares = []
+            
         # Execute standard pop
-        result = super().pop()
-        
-        # Clear the tracked information
-        self._last_moved_piece = None
-        self._last_capture_square = None
-        
-        return result
+        return super().pop()
 
     def check_drawback_win(self, color, drawback_name) -> bool:
         """
@@ -390,7 +746,16 @@ class DrawbackBoard(chess.Board):
         opponent = not color
         
         # Special case for atomic bomb - we need to check adjacency to king
-        if drawback_name == "atomic_bomb" and hasattr(self, '_last_capture_square') and self._last_capture_square is not None:
+        if drawback_name == "atomic_bomb":
+            # First ensure there's a move stack and a last capture square
+            if len(self.move_stack) == 0 or not hasattr(self, '_last_capture_square') or self._last_capture_square is None:
+                return False
+                
+            last_move = self.move_stack[-1]
+            # CRITICAL: Only consider actual captures for atomic bomb
+            if not self.is_capture(last_move):
+                return False
+                
             # Find the opponent's king
             king_square = None
             for square, piece in self.piece_map().items():
@@ -408,16 +773,39 @@ class DrawbackBoard(chess.Board):
                 # If they're adjacent (within 1 square in any direction)
                 if abs(king_file - capture_file) <= 1 and abs(king_rank - capture_rank) <= 1:
                     if king_square != capture_square:  # Not the king itself
+                        # For debugging
+                        print(f"Drawback win: {color} won by atomic bomb - " +
+                              f"Capture at {chess.square_name(capture_square)} " +
+                              f"adjacent to {opponent} king at {chess.square_name(king_square)}")
                         return True
         
         # For other drawbacks, use the loss function from drawback_manager
         try:
-            from GameState.drawback_manager import get_drawback_loss_function
             loss_function = get_drawback_loss_function(drawback_name)
             if loss_function and loss_function(self, opponent):
                 return True
         except (ImportError, Exception):
             pass
             
-        # No win condition found
         return False
+
+    def get_last_move_info(self):
+        """
+        Return information about the last move for drawbacks to use
+        
+        Returns:
+            tuple: (was_capture, captured_piece, move)
+        """
+        if not self._move_history:
+            return False, None, None
+            
+        move, was_capture, captured_piece = self._move_history[-1]
+        return was_capture, captured_piece, move
+
+    # Override has_legal_en_passant to avoid recursion
+    def has_legal_en_passant(self) -> bool:
+        """
+        Custom implementation to avoid calling into generate_legal_ep which calls is_variant_end.
+        In Drawback Chess, en passant is always legal if the ep_square is set.
+        """
+        return self.ep_square is not None
