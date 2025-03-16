@@ -715,6 +715,6 @@ def get_piece_value(piece):
         chess.BISHOP: 330,
         chess.ROOK: 500,
         chess.QUEEN: 900,
-        chess.KING: 10000
+        chess.KING: 20000  # MATE_UPPER value - absolutely critical
     }
     return values.get(piece.piece_type, 0) 

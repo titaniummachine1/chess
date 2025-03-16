@@ -29,9 +29,21 @@ def select_random_element(collection):
     return random.choice(list(collection))
 
 def get_king_capture_move(board):
-    """Find a move that captures the opponent's king if available"""
+    """
+    Find a move that directly captures the opponent's king, if any exist.
+    This is a critical move in Drawback Chess which should always be played.
+    
+    Args:
+        board: Current chess position
+        
+    Returns:
+        A move that captures the king, or None if no such move exists
+    """
+    # Find a move that captures the opponent's king, if it exists
     for move in board.legal_moves:
         target = board.piece_at(move.to_square)
         if target and target.piece_type == chess.KING:
+            # Direct king capture - highest priority move
             return move
+            
     return None

@@ -182,10 +182,13 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_tim
             # Found immediate win!
             return EngineResult(
                 move=move,
-                score=9900,
+                score=MATE_UPPER,
                 pv=[move.uci()],
                 nodes=1,
-                time=0.01
+                time=0.01,
+                tt={},
+                killers=[[None, None]],
+                history={}
             )
     
     # Set up time management
@@ -252,7 +255,7 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_tim
             if king_capture_move:
                 return EngineResult(
                     move=king_capture_move, 
-                    score=9000,
+                    score=MATE_UPPER,
                     pv=[king_capture_move.uci()],
                     nodes=1,
                     time=elapsed,
@@ -284,7 +287,10 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_tim
             score=0,
             pv=[best_move.uci()] if best_move else [],
             nodes=0,
-            time=elapsed
+            time=elapsed,
+            tt={},
+            killers=[[None, None]],
+            history={}
         )
     except Exception as e:
         # If any error occurs, return a minimal result
@@ -301,11 +307,14 @@ def select_best_move(board, depth, time_limit, book_move_bonuses=None, smart_tim
                 score=0,
                 pv=[fallback_move.uci()],
                 nodes=0,
-                time=time.time() - start_time
+                time=time.time() - start_time,
+                tt={},
+                killers=[[None, None]],
+                history={}
             )
         
     # Should never reach here, but provide a null result just in case
-    return EngineResult(move=None, score=0, pv=[], nodes=0, time=0)
+    return EngineResult(move=None, score=0, pv=[], nodes=0, time=0, tt={}, killers=[[None, None]], history={})
 
 def evaluate_current_position(board, include_drawback_effects=True):
     """
